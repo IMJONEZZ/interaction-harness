@@ -1,6 +1,6 @@
 [project]
 name = "interaction-harness"
-version = "0.1.0"
+version = "0.2.0"
 description = "A voice agent whose interaction model (turn-taking, barge-in, background work) is visible and swappable"
 dynamic = ["readme"]
 license = "MIT"
