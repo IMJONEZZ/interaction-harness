@@ -17,6 +17,7 @@
     <span class="pill" id="pill-tts" title="text → speech">TTS · —</span>
     <span class="pill" id="pill-foreground" title="holds the conversation; judges end-of-turn">foreground · —</span>
     <span class="pill" id="pill-background" title="works on handed-off tasks">background · —</span>
+    <span class="pill" id="pill-duplex" title="full-duplex speech model: hears and talks at once" hidden>duplex · —</span>
     <span class="pill ws" id="pill-ws">socket · connecting</span>
   </div>
 </header>
@@ -28,6 +29,7 @@
     <button data-mode="ptt" title="Half-duplex: you commit the turn">Push-to-talk</button>
     <button data-mode="vad" title="Silero VAD + fixed silence timeout">VAD timeout</button>
     <button data-mode="semantic" class="on" title="VAD + LLM end-of-turn judge">Semantic EOT</button>
+    <button data-mode="duplex" id="mode-duplex" title="One speech model hears and talks at once; it decides who has the floor" hidden>Full-duplex</button>
   </div>
   <label class="tog"><input type="checkbox" id="cfg-barge" checked> barge-in</label>
   <label class="tog"><input type="checkbox" id="cfg-filler" checked> filler</label>

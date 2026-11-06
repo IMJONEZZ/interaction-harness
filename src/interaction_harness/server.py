@@ -36,11 +36,14 @@ def status(settings: Settings, speech: SpeechStack) -> dict:
     def role(ep, model_id=None):
         return {"model": model_id or ep.model, "where": backend if ep.local else ep.host}
 
-    return {"version": __version__,
-            "roles": {"asr": role(settings.asr, speech.asr.model_id),
-                      "tts": role(settings.tts, speech.tts.model_id),
-                      "foreground": role(settings.foreground),
-                      "background": role(settings.background)},
+    roles = {"asr": role(settings.asr, speech.asr.model_id),
+             "tts": role(settings.tts, speech.tts.model_id),
+             "foreground": role(settings.foreground),
+             "background": role(settings.background)}
+    if settings.duplex.base_url:
+        from .duplex import DEFAULT_MODEL
+        roles["duplex"] = {"model": settings.duplex.model or DEFAULT_MODEL, "where": settings.duplex.host}
+    return {"version": __version__, "roles": roles,
             "vad": speech.vad_name, "voices": speech.tts.voices, "voice": settings.tts_voice,
             "tools": {name: sorted(t.lanes) for name, t in REGISTRY.items()}}
 
@@ -55,8 +58,9 @@ def create_app(settings: Settings, speech: SpeechStack | None = None, llm: LLM |
             print(note, flush=True)
         app.state.speech = speech or await build_speech(settings)
         app.state.llm = llm or LLM(settings)
-        fg, bg = settings.foreground, settings.background
-        print(f"foreground {fg.model} @ {fg.host}  |  background {bg.model} @ {bg.host}", flush=True)
+        fg, bg, dx = settings.foreground, settings.background, settings.duplex
+        print(f"foreground {fg.model} @ {fg.host}  |  background {bg.model} @ {bg.host}"
+              + (f"  |  duplex @ {dx.host}" if dx.base_url else ""), flush=True)
         yield
 
     app = FastAPI(title="interaction-harness", version=__version__, lifespan=lifespan)

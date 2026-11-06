@@ -1,4 +1,4 @@
-# Endpoints: the four model roles
+# Endpoints: the model roles
 
 Every model the harness uses is a *role*, and every role is an OpenAI-compatible endpoint:
 
@@ -8,6 +8,7 @@ Every model the harness uses is a *role*, and every role is an OpenAI-compatible
 | `BACKGROUND` | `POST {base}/chat/completions` (streaming, tools, thinking on) | delegated tasks; up to `BACKGROUND_ROUNDS` model calls each, with web search |
 | `ASR` | `POST {base}/audio/transcriptions` (multipart: 16 kHz WAV, `model`, `response_format=json`, optional `language`) | the final transcript of each turn, and partial transcripts while you talk |
 | `TTS` | `POST {base}/audio/speech` (JSON: `model`, `input`, `voice`, `speed`, `response_format`) | one request per sentence chunk |
+| `DUPLEX` (optional) | WebSocket `{base}/realtime`, OpenAI Realtime-style events | full-duplex mode: one speech-to-speech model in place of ASR, foreground and TTS. See [duplex.md](duplex.md) |
 
 `{base}` is the role's `<ROLE>_BASE_URL`, and includes the `/v1`.
 

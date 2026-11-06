@@ -6,7 +6,9 @@ something hard and then brings the answer up on its own.
 
 Every model it uses is an **OpenAI-compatible endpoint you choose**: speech-to-text, text-to-speech,
 the foreground model that holds the conversation, and the background model it hands work to. Speech can
-also run in-process, on Apple Silicon (MLX) or anywhere else (ONNX).
+also run in-process, on Apple Silicon (MLX) or anywhere else (ONNX). And when you want to compare against
+a model that does all of it natively, **full-duplex mode** hands the microphone to one speech-to-speech
+model that listens and talks at once.
 
 ![A real session: a tool call, a barge-in, a timer, and a background task delivered proactively](demos/session.gif)
 
@@ -29,6 +31,10 @@ microphone. Real time, no cuts.</sub>
 - **Every step on screen.** VAD probability, partial and final transcripts, the judge's verdicts, streamed
   tokens and reasoning, tool calls, the TTS queue (struck through when you interrupt), background tasks,
   and a per-turn latency waterfall from the end of your speech to the first audio.
+- **A native full-duplex model to compare against.** Switch to *Full-duplex* and NVIDIA's NemotronLabs
+  VoiceChat 11B takes the floor: it decides when to speak and when to stop, and still calls tools and hands
+  work to the background model. The harness measures it the same way: how fast it answers, and how fast it
+  stops when you cut in. See [docs/duplex.md](docs/duplex.md).
 
 ## Four model roles, four endpoints
 
@@ -38,6 +44,7 @@ microphone. Real time, no cuts.</sub>
 | `TTS` | text → speech | `POST /v1/audio/speech` | Kokoro-82M, in-process |
 | `FOREGROUND` | holds the conversation, calls quick tools, hands off; also judges end-of-turn | `POST /v1/chat/completions` | required |
 | `BACKGROUND` | works on handed-off tasks with thinking on; can browse | `POST /v1/chat/completions` | the foreground's server and model |
+| `DUPLEX` (optional) | full-duplex mode: one speech-to-speech model in place of ASR, foreground and TTS | WebSocket `/v1/realtime` | the mode is off |
 
 Each role takes `<ROLE>_BASE_URL`, `<ROLE>_API_KEY` and `<ROLE>_MODEL`, so you can mix them freely. For
 example, run ASR on a GPU box, TTS on your laptop, the foreground on a small fast local model, and the
@@ -105,6 +112,7 @@ Settings come from flags, then the environment, then `.env` in the working direc
 | `interaction-harness doctor` | checks each role on its own: streaming, tool calls, the end-of-turn judge, a TTS → ASR round trip, VAD; reports latency |
 | `interaction-harness selftest` | talks to the agent with synthesized speech and checks endpointing, tools, barge-in, background delivery, timers, push-to-talk and typed turns |
 | `interaction-harness warmup` | downloads and loads the in-process speech models, then exits |
+| `interaction-harness duplex-server` | serves the full-duplex model for `DUPLEX_BASE_URL` (Apple Silicon; the `duplex` extra) |
 
 They all take the same settings flags (`--foreground-base-url`, `--asr-model`, `--backend onnx`, …).
 `interaction-harness serve --help` lists them.
@@ -161,6 +169,7 @@ call a tool add a model round trip; the waterfall shows each segment.
 | in-process speech | ONNX on CPU, macOS arm64 | tested: `doctor`, `selftest` |
 | in-process speech | ONNX on CPU, Linux x86_64 | tested in CI: `warmup` round trip |
 | in-process speech | ONNX on CPU, Linux arm64 (DGX Spark) | not yet tested |
+| duplex | `duplex-server`: NemotronLabs VoiceChat 11B (4-bit) on mlx-vlm 0.7.12 | tested: `doctor`, `selftest` |
 | foreground, background | Ollama, LM Studio | built on llama.cpp, the engine tested above |
 | any role | OpenAI, Speaches, Kokoro-FastAPI, other servers | untested; should work if they implement the endpoint. Run `doctor`, and please [report what you find](https://github.com/IMJONEZZ/interaction-harness/issues/new?template=server-report.yml) |
 
@@ -187,14 +196,17 @@ means, the turn-taking regimes in use today, and the latency budgets people cite
 
 ### Where it stops short
 
-This is a cascade, and a cascade has limits that a native full-duplex model doesn't:
+The three cascade modes have limits that a native full-duplex model doesn't:
 
 - no backchannel while you talk
 - no overlapping speech
 - no reaction to *how* you said something, because ASR drops prosody
 - the end-of-turn judge only sees text
 
-In exchange you get a swappable brain, tools, auditability, and a latency budget you can see.
+In exchange you get a swappable brain, reliable tools, auditability, and a latency budget you can see.
+Full-duplex mode lets you measure that trade on your own voice: on this Mac the duplex model answers a
+plain question in 0.7–0.9 s, about what the cascade takes, but needs over 5 s for a tool question, and its
+tool use is less reliable.
 
 ## Docs
 
@@ -202,6 +214,7 @@ In exchange you get a swappable brain, tools, auditability, and a latency budget
 - [docs/backends.md](docs/backends.md): in-process speech on MLX and ONNX, model variants, GPUs
 - [docs/protocol.md](docs/protocol.md): the WebSocket protocol, if you want your own front end
 - [docs/tools.md](docs/tools.md): writing tools, and how the background hand-off and timers work
+- [docs/duplex.md](docs/duplex.md): full-duplex mode, its tool protocol, and what it measures
 - [docs/interaction-models.md](docs/interaction-models.md): background reading
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 
@@ -216,6 +229,8 @@ In exchange you get a swappable brain, tools, auditability, and a latency budget
 | [mlx-audio](https://github.com/Blaizzy/mlx-audio) | Blaizzy | MIT |
 | [onnx-asr](https://github.com/istupakov/onnx-asr) | istupakov | MIT |
 | [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx) | thewh1teagle | MIT |
+| [NemotronLabs VoiceChat 11B](https://huggingface.co/nvidia/NVIDIA-NemotronLabs-VoiceChat-11B) (full-duplex mode; downloaded, not shipped) | NVIDIA | OpenMDW-1.1 |
+| [mlx-vlm](https://github.com/Blaizzy/mlx-vlm) | Blaizzy | MIT |
 
 The web tools follow the design of Unsloth Studio's, re-implemented from scratch.
 

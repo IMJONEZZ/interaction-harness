@@ -18,7 +18,7 @@ small { color: var(--muted); font-weight: 400; margin-left: 8px; }
 .pills { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .pill { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--ink2); font-family: ui-monospace, Menlo, monospace; }
 .pill.ws.on { border-color: var(--aqua); color: var(--aqua); }
-.pill.ws.off { border-color: var(--red); color: var(--red); }
+.pill.ws.off, .pill.off { border-color: var(--red); color: var(--red); }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 8px 18px 10px; border-bottom: 1px solid var(--line); }
 .btn { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }

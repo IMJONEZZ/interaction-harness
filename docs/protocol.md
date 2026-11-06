@@ -18,6 +18,7 @@ session, with its own state machine, history and VAD.
 | `ptt` | `down: bool` | push-to-talk press and release (push-to-talk mode only) |
 | `text` | `text: str` | a typed user turn |
 | `playback` | `event: "start" \| "end" \| "drained"`, `id` | report that a TTS chunk started or finished playing, or that the queue is empty. Turns end, and barge-in decides what was heard, from these |
+| `playback` | `event: "voice"`, `on: bool` | full-duplex mode: the model's stream became audible or went quiet, at the moment you hear it |
 | `stop` | | interrupt the agent (same as barge-in) |
 | `reset` | | clear the history and notes |
 | `ping` | | the server answers `pong` |
@@ -26,7 +27,7 @@ session, with its own state machine, history and VAD.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `mode` | `semantic` | turn-taking: `ptt`, `vad` or `semantic` |
+| `mode` | `semantic` | turn-taking: `ptt`, `vad`, `semantic`, or `duplex` (needs `DUPLEX_BASE_URL`; see [duplex.md](duplex.md)) |
 | `barge_in` | `true` | interrupt the agent when you talk |
 | `filler` | `true` | say a cached filler line if the reply is slow |
 | `foreground_thinking` | `false` | turn thinking on for the foreground model |
@@ -46,11 +47,15 @@ session, with its own state machine, history and VAD.
 sample rate comes with every chunk, because endpoint TTS servers differ. Play the chunks in order, and
 send `playback` start/end for each.
 
+In full-duplex mode the model's audio arrives as one continuous stream of 80 ms frames, with chunk id
+`0xFFFFFFFE` (silent) or `0xFFFFFFFF` (voiced). Play them back to back, without `start`/`end`; send
+`playback` `voice` when playback goes from silent to voiced or back.
+
 **JSON events:** every event has `type` and `t` (milliseconds since the epoch).
 
 | `type` | Fields | When |
 |---|---|---|
-| `hello` | `version`, `roles{asr,tts,foreground,background: {model, where}}`, `vad`, `voices`, `voice`, `tools` | on connect |
+| `hello` | `version`, `roles{asr,tts,foreground,background,duplex?: {model, where}}`, `vad`, `voices`, `voice`, `tools` | on connect (`duplex` only when configured) |
 | `config` | the full `Config` | after every `config` message |
 | `state` | `state`: `idle`, `listen`, `user_speaking`, `endpointing`, `think` or `speak` | on every transition |
 | `vad` | `p`, `rms` | every other 32 ms frame |
@@ -58,8 +63,8 @@ send `playback` start/end for each.
 | `asr.partial` | `text`, `ms`, `audio_s` | partial transcript |
 | `endpoint` | `phase`: `silence`, `judge` or `resumed`; `verdict`, `text`, `ms`, `silence_ms` | each end-of-turn decision |
 | `user.end` | `reason`, `audio_s`, `eot_ms`, `turn` | the user's turn is over |
-| `asr.final` | `text`, `ms`, `audio_s`, `turn`, `model` | final transcript (`model: "typed"` for typed turns) |
-| `turn.start` | `turn`, `source` (`voice`, `typed` or `proactive`), `lane`, `thinking` | the agent's turn begins |
+| `asr.final` | `text`, `ms`, `audio_s`, `turn`, `model` | final transcript (`model: "typed"` for typed turns, `"duplex"` for what the duplex model heard) |
+| `turn.start` | `turn`, `source` (`voice`, `typed`, `proactive` or `duplex`), `lane`, `thinking` | the agent's turn begins |
 | `llm.first_token` | `ms`, `round` | foreground time to first token |
 | `llm.reasoning` / `llm.content` | `delta`, `lane` | streamed foreground tokens |
 | `llm.tool_call` / `llm.tool_result` | `id`, `name`, `arguments` / `result`, `ms` | foreground tools |
@@ -77,6 +82,11 @@ send `playback` start/end for each.
 | `background.round` | `id`, `round`, `tokens`, `tps`, `ms` | one background model call finished |
 | `background.done` | `id`, `result`, `ms` | the result, waiting for a gap |
 | `proactive` | `kind` (`timer` or `background`), `id`, … | the agent takes its own turn to deliver it |
+| `duplex.status` | `state` (`loading`, `ready`, `error`, `closed`), `model`, `load_ms`, `tool_outputs`, `error` | the full-duplex session |
+| `duplex.utterance` | `turn`, `text` | the duplex model finished saying something |
+| `duplex.overlap` | `who` (`you` or `model`), `text` | someone started talking over the other |
+| `duplex.yield` | `ms`, `kept_talking`, `turn` | how long the model kept talking after you cut in |
+| `duplex.tool_output` | `output` | a tool result (or a timer or background result) sent to the duplex model |
 | `log` | `level`, `text` | anything worth showing |
 | `pong` | | answer to `ping` |
 

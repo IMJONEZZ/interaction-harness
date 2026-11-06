@@ -29,7 +29,7 @@ actually configure:
 | **VAD silence timeout** | Silero VAD plus a fixed silence | adds the whole timeout (700 ms of timeout ≈ +700 ms) | LiveKit `vad`; OpenAI `server_vad` (`silence_duration_ms`) |
 | **STT endpointing** | the ASR emits end-of-utterance | faster than raw silence | LiveKit `stt`; Deepgram Flux `EndOfTurn` (`eot_threshold`), with eager EOT for a speculative LLM start |
 | **Semantic end-of-turn** | a model reads the transcript (and/or audio) and predicts "done?" | 12–160 ms per judgement; can end a turn after about 300 ms of silence | LiveKit turn detector (0.1B distilled Qwen2.5, `min_delay` 0.3 s / `max_delay` 2.5 s); Pipecat Smart Turn v3 (12.6 ms on CPU); OpenAI `semantic_vad` (`eagerness`); Kyutai Unmute |
-| **Full-duplex** | the model listens and speaks at once, every frame | about 160–400 ms turn latency; needs a native model | Moshi (Kyutai), TML-Interaction-Small (0.40 s on FD-Bench), Gemini native audio |
+| **Full-duplex** | the model listens and speaks at once, every frame | about 160–400 ms turn latency; needs a native model | Moshi (Kyutai), TML-Interaction-Small (0.40 s on FD-Bench), Gemini native audio, NemotronLabs VoiceChat 11B (open, with tool calls; this harness's `duplex` mode) |
 | **Barge-in** | cancel playback, truncate context to what was heard | must tell a backchannel ("uh-huh") from a claim on the floor | OpenAI `conversation.item.truncate`; LiveKit `interruption.min_duration/min_words`; Vapi `stopSpeakingPlan` |
 | **Filler / "thinking out loud"** | say something while the reasoner works | hides time to first token; can sound fake if overused | ConvFill (talker plus streamed reasoner); LiveKit `preemptive_generation` |
 
@@ -45,13 +45,14 @@ A well-tuned cascade spends:
 Untuned production cascades commonly run 1.5–3 s. The waterfall in the dashboard measures exactly these
 segments, turn by turn.
 
-**Cascades versus speech-to-speech.**
+**Cascades versus speech-to-speech.** The harness runs both: the three cascade modes, and a full-duplex
+mode with a native model ([duplex.md](duplex.md)), on the same microphone and dashboard.
 
-| | Cascade (this harness) | Speech-to-speech / full-duplex model |
+| | Cascade (ptt, vad, semantic) | Speech-to-speech / full-duplex model |
 |---|---|---|
 | Swap a component | yes, any one | no; you can't swap the brain |
 | Model | any LLM | the native model |
-| Tools | easy to call | — |
+| Tools | easy to call | few models can; VoiceChat 11B calls them, and reads each result one token per 80 ms |
 | Paralinguistics (prosody, tone) | lost | kept |
 | Latency | a serial chain of steps | saves 100–200 ms |
 | Backchannel or interject | no | yes |

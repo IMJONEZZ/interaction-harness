@@ -14,6 +14,7 @@ Turn-taking modes (cfg.mode):
     ptt       - half-duplex; the client commits the turn (hold-to-talk)
     vad       - Silero VAD + fixed silence timeout
     semantic  - VAD + an LLM end-of-turn judge (short min silence, long max silence)
+    duplex    - no state machine: a full-duplex speech model hears and talks at once (duplex.py)
 
 Two models:
     foreground - thinking off, answers now, may call tools, may delegate
@@ -38,6 +39,7 @@ import numpy as np
 
 from . import llm as llm_mod
 from .config import Settings
+from .duplex import DuplexMode
 from .llm import LLM
 from .prompts import FILLERS
 from .speech import MIC_SR, VAD_FRAME, SentenceChunker, SpeechStack, strip_markdown
@@ -51,7 +53,7 @@ BG_HISTORY_MAX = 50
 
 @dataclass
 class Config:
-    mode: str = "semantic"          # ptt | vad | semantic
+    mode: str = "semantic"          # ptt | vad | semantic | duplex
     barge_in: bool = True
     filler: bool = True
     foreground_thinking: bool = False  # thinking on the foreground model (slower, shows reasoning)
@@ -174,6 +176,11 @@ class Session:
         self._bg_tasks: set[asyncio.Task] = set()
         self._proactive_task = asyncio.create_task(self._proactive_loop())
 
+        # full-duplex: opened now, because loading its prompt takes seconds
+        self.duplex = DuplexMode(self) if settings.duplex.base_url else None
+        if self.duplex:
+            self.duplex.start()
+
     # ------------------------------------------------------------------ #
     # plumbing
     # ------------------------------------------------------------------ #
@@ -196,6 +203,8 @@ class Session:
             t.cancel()
         await self._cancel_reply(reason="close")
         await self._close_stream()
+        if self.duplex:
+            await self.duplex.close()
 
     # ------------------------------------------------------------------ #
     # client messages
@@ -205,8 +214,13 @@ class Session:
         if t == "config":
             old_mode = self.cfg.mode
             self.cfg.update({k: v for k, v in msg.items() if k != "type"})
+            if self.cfg.mode == "duplex" and not self.duplex:
+                self.cfg.mode = old_mode
+                await self.emit("log", level="error", text="full-duplex needs DUPLEX_BASE_URL (see docs/duplex.md)")
             await self.emit("config", **asdict(self.cfg))
-            if old_mode != self.cfg.mode and self.state in ("user_speaking", "endpointing"):
+            if old_mode != self.cfg.mode and "duplex" in (old_mode, self.cfg.mode):
+                await self._switch_duplex(entering=self.cfg.mode == "duplex")
+            elif old_mode != self.cfg.mode and self.state in ("user_speaking", "endpointing"):
                 await self._end_user_turn(reason="mode changed")
         elif t == "mic":
             if msg.get("on"):
@@ -221,13 +235,18 @@ class Session:
             await self._on_ptt(bool(msg.get("down")))
         elif t == "text":
             text = (msg.get("text") or "").strip()
-            if text:
+            if text and self.cfg.mode == "duplex":
+                await self.emit("log", level="warn", text="the full-duplex model only hears audio; typed turns "
+                                                          "work in the other modes")
+            elif text:
                 await self._on_typed(text)
         elif t == "playback":
             await self._on_playback(msg)
         elif t == "stop":
             await self._interrupt(source="button")
         elif t == "reset":
+            if self.duplex:
+                await self.duplex.restart()  # a fresh model session: it forgets the conversation too
             await self._cancel_reply(reason="reset")
             self.history = [{"role": "system", "content": self.s.foreground_prompt}]
             self.tools_ctx.notes.clear()
@@ -254,6 +273,9 @@ class Session:
         rms = float(np.sqrt(np.mean((frame.astype(np.float32) / 32768.0) ** 2)))
         if self._frame_i % 2 == 0:
             await self.emit("vad", p=round(p, 3), rms=round(rms, 4))
+        if self.cfg.mode == "duplex":
+            await self.duplex.on_frame(frame, p)
+            return
         speech = p >= self.cfg.onset_thresh
         now = time.perf_counter()
         if speech:
@@ -646,8 +668,25 @@ class Session:
         except Exception as e:  # noqa: BLE001
             await self.emit("log", level="warn", text=f"filler skipped: {type(e).__name__}: {e}")
 
+    async def _switch_duplex(self, entering: bool):
+        """Hand the floor to the full-duplex model, or take it back."""
+        if entering:
+            if self.state in ("user_speaking", "endpointing"):
+                await self._abandon_utterance()
+            await self._interrupt(source="mode")
+            self.duplex.start()  # no-op when already open
+            await self.set_state("listen")
+        else:
+            await self.emit("playback.stop")
+            self.duplex.user_on = self.duplex.agent_on = False
+            await self.set_state("listen")
+
     async def _on_playback(self, msg: dict):
         ev, cid = msg.get("event"), msg.get("id")
+        if ev == "voice" or self.cfg.mode == "duplex":  # the duplex stream is reported as voiced/silent only
+            if ev == "voice" and self.duplex and self.cfg.mode == "duplex":
+                await self.duplex.on_voice(bool(msg.get("on")))
+            return
         m = self.metrics
         if ev == "start":
             self.chunks_started.add(cid)
@@ -823,6 +862,12 @@ class Session:
         try:
             while True:
                 await asyncio.sleep(0.25)
+                if self.proactive and self.cfg.mode == "duplex":
+                    if self.duplex.can_deliver():
+                        item = self.proactive.popleft()
+                        await self.emit("proactive", **item, waited_ms=0)
+                        await self.duplex.deliver(item)
+                    continue
                 if not self.proactive or self.state not in ("listen", "idle") or self.ptt_down:
                     continue
                 if time.perf_counter() - self.last_user_activity < 1.0:

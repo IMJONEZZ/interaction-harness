@@ -49,7 +49,7 @@ def safe_eval(expr: str) -> float:
 # --------------------------------------------------------------------------- #
 # instant
 # --------------------------------------------------------------------------- #
-@tool(description="Current local date and time.", parameters=_p({}, []))
+@tool(description="Current local date and time.", parameters=_p({}, []), lanes=["foreground", "background", "duplex"])
 def get_time() -> dict:
     now = datetime.now()
     return {"iso": now.isoformat(timespec="seconds"), "spoken": now.strftime("%A, %B %-d, %-I:%M %p")}
@@ -80,12 +80,16 @@ _SKY = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "overcast", 45: "f
 
 
 @tool(description="Current weather for a city (Open-Meteo, no key).",
-      parameters=_p({"city": {"type": "string"}}, ["city"]))
+      parameters=_p({"city": {"type": "string"}}, ["city"]), lanes=["foreground", "background", "duplex"])
 async def get_weather(city: str = "") -> dict:
     async with httpx.AsyncClient(timeout=8) as c:
-        g = await c.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": city, "count": 1})
-        g.raise_for_status()
-        res = (g.json().get("results") or [])
+        res = []
+        for name in dict.fromkeys([city, city.split(",")[0].strip()]):  # "Boston, USA" -> "Boston" if needed
+            g = await c.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": name, "count": 1})
+            g.raise_for_status()
+            res = g.json().get("results") or []
+            if res:
+                break
         if not res:
             return {"error": f"no such place: {city}"}
         loc = res[0]
@@ -95,10 +99,13 @@ async def get_weather(city: str = "") -> dict:
                                 "temperature_unit": "fahrenheit", "wind_speed_unit": "mph"})
         w.raise_for_status()
         cur = w.json().get("current", {})
+        sky = _SKY.get(cur.get("weather_code"), "unknown")
         return {"place": f"{loc.get('name')}, {loc.get('admin1', '')} {loc.get('country_code', '')}".strip(),
                 "temp_f": cur.get("temperature_2m"), "feels_like_f": cur.get("apparent_temperature"),
                 "humidity_pct": cur.get("relative_humidity_2m"), "wind_mph": cur.get("wind_speed_10m"),
-                "sky": _SKY.get(cur.get("weather_code"), "unknown")}
+                "sky": sky,
+                "spoken": f"{loc.get('name')}: {round(cur.get('temperature_2m') or 0)} degrees Fahrenheit, {sky}, "
+                          f"wind {round(cur.get('wind_speed_10m') or 0)} miles per hour"}
 
 
 @tool(description="Look up a topic on Wikipedia and return a short summary.",
@@ -121,20 +128,20 @@ async def wikipedia(topic: str = "") -> dict:
 # --------------------------------------------------------------------------- #
 # async: these come back later through the proactive channel
 # --------------------------------------------------------------------------- #
-@tool(description="Start a timer. When it fires, the assistant will proactively tell the user. "
-                  "Use for reminders like 'remind me in 30 seconds'.",
+@tool(description="Set a timer or a reminder, such as 'remind me in 30 seconds to stretch'. When it fires, the "
+                  "assistant will proactively tell the user.",
       parameters=_p({"seconds": {"type": "number"}, "label": {"type": "string"}}, ["seconds", "label"]),
-      lanes=["foreground"])
+      lanes=["foreground", "duplex"])
 async def set_timer(ctx: ToolContext, seconds: float = 0, label: str = "timer") -> dict:
     return await ctx.on_timer(float(seconds), str(label))
 
 
-@tool(description="Hand a task that needs real thinking (analysis, planning, comparison, writing, multi-step "
-                  "reasoning, research) to the background model. Returns immediately; the result "
+@tool(description="Hand a task that needs real thinking (analysis, planning, comparison, calculation, writing, "
+                  "multi-step reasoning, research) to the background model. Returns immediately; the result "
                   "is delivered proactively when ready. Use this instead of answering slowly yourself.",
       parameters=_p({"task": {"type": "string", "description": "Self-contained description of the task"}},
                     ["task"]),
-      lanes=["foreground"])
+      lanes=["foreground", "duplex"])
 async def delegate_background_task(ctx: ToolContext, task: str = "") -> dict:
     return await ctx.on_delegate(str(task))
 

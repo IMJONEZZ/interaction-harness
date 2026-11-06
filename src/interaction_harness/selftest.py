@@ -10,11 +10,13 @@ foreground / TTS path runs exactly as it would with a microphone. The test also 
     * barge-in: speaking while the agent speaks interrupts it
     * a background task is delegated and delivered proactively, and a timer fires and is announced
     * push-to-talk and typed turns, with a note remembered and recalled
+    * with DUPLEX_BASE_URL set: the full-duplex model answers (and calls a tool), and stops when talked over
 
 Checks that depend on the model's choices rather than the harness (which tool it picked when two would do,
 whether the background model streamed its reasoning) are warnings, not failures.
 
-    interaction-harness selftest     # starts a server in-process unless one is already listening
+    interaction-harness selftest            # starts a server in-process unless one is already listening
+    interaction-harness selftest --duplex   # only the full-duplex part
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ import numpy as np
 import websockets
 
 from .config import Settings
+from .duplex import STREAM_SILENT, STREAM_VOICED
 from .speech import MIC_SR, VAD_FRAME, local_backend, run_local
 from .speech.base import resample
 
@@ -40,6 +43,10 @@ UTTERANCES = {
                    "out whether a 30 year mortgage at 6 percent or a 15 year at 5 and a half percent costs less in "
                    "total interest on 400 thousand dollars, and by how much."),
     "remember": "Remember that my favorite color is green.",
+    "goldfish": "What's a good name for a goldfish?",
+    "timer": "Remind me in fifteen seconds to stretch.",
+    "delegate": ("In the background, work out whether a 15 year mortgage at 5 and a half percent or a 30 year at 6 "
+                 "percent costs less interest on 400 thousand dollars."),
 }
 QUIET_EVENTS = ("vad", "llm.content", "llm.reasoning", "background.reasoning", "background.content", "tts.queued")
 
@@ -52,6 +59,7 @@ class Client:
         self.state = "idle"
         self._play_tasks: set[asyncio.Task] = set()
         self.pending = 0
+        self.voiced = False  # the full-duplex model's stream, as the browser would report it
         self.reader = asyncio.create_task(self._read())
 
     async def _read(self):
@@ -59,6 +67,11 @@ class Client:
             if isinstance(msg, bytes):
                 cid, sr = struct.unpack("<II", msg[:8])
                 pcm = np.frombuffer(msg[8:], dtype=np.int16)
+                if cid in (STREAM_SILENT, STREAM_VOICED):
+                    if (cid == STREAM_VOICED) != self.voiced:
+                        self.voiced = cid == STREAM_VOICED
+                        await self.send({"type": "playback", "event": "voice", "on": self.voiced})
+                    continue
                 self.audio_chunks.append((cid, sr, pcm))
                 t = asyncio.create_task(self._play(cid, len(pcm) / sr))
                 self._play_tasks.add(t); t.add_done_callback(self._play_tasks.discard)
@@ -224,6 +237,77 @@ async def conversation(c: Client, ck: Checks):
     await c.send({"type": "mic", "on": False})
 
 
+async def duplex_conversation(c: Client, ck: Checks):
+    """The full-duplex model: no harness turn-taking, so check what the model itself did."""
+    print("\n--- full-duplex ---", flush=True)
+    await c.send({"type": "config", "mode": "duplex"})
+    st = await c.wait_for("duplex.status", 300, 0, pred=lambda e: e["state"] in ("ready", "error"))
+    ck.check(st["state"] == "ready", f"duplex model ready: {st.get('model', st.get('error'))} (session opened in "
+                                     f"{st.get('load_ms')} ms; tool results {'on' if st.get('tool_outputs') else 'off'})")
+    if st["state"] != "ready":
+        return
+    await c.send({"type": "mic", "on": True})
+    await c.silence(4.0)  # it may greet you first
+
+    def first_audio(since: int) -> float | None:
+        met = [e for e in c.events[since:] if e["type"] == "metrics" and "first_audio" in e["marks"]]
+        return met[0]["marks"]["first_audio"] if met else None
+
+    n = len(c.events)
+    await c.say("goldfish", post_silence=5.0)
+    fa = first_audio(n)
+    said = "".join(e.get("delta", "") for e in c.events[n:] if e["type"] == "llm.content").strip()
+    ck.check(fa is not None and bool(said), "the model answered on its own" +
+             (f", first audio {fa:.0f} ms after you stopped: {said[:80]!r}" if fa is not None else ""))
+
+    n = len(c.events)
+    await c.say("time", post_silence=8.0)
+    fa = first_audio(n)
+    said = "".join(e.get("delta", "") for e in c.events[n:] if e["type"] == "llm.content").strip()
+    ck.check(fa is not None and bool(said), "it answered a tool question" +
+             (f", first audio {fa:.0f} ms after you stopped: {said[:80]!r}" if fa is not None else ""))
+    calls = [e["name"] for e in c.events[n:] if e["type"] == "llm.tool_call"]
+    ck.warn("get_time" in calls, f"it called get_time (tools called: {calls or 'none'})")
+    heard = [e["text"] for e in c.events[n:] if e["type"] == "asr.final"]
+    ck.warn(any("time" in h.lower() for h in heard), f"its transcript of you: {heard}")
+
+    n = len(c.events)
+    await c.say("lecture", post_silence=0.0)
+    try:
+        await c.wait_for("state", 20, n, pred=lambda e: e["state"] == "speak")
+    except TimeoutError:
+        ck.check(False, "the model didn't start talking after a long request")
+        return
+    await c.silence(2.0)  # let it talk
+    n = len(c.events)
+    await c.say("interrupt", pre_silence=0.0, post_silence=4.0)
+    y = [e for e in c.events[n:] if e["type"] == "duplex.yield"]
+    ck.warn(bool(y) and not y[0]["kept_talking"],
+            f"it stopped when talked over: {y[0]['ms']} ms after you cut in" if y and not y[0]["kept_talking"] else
+            "it kept talking over you" if y else "no cut-in measured (it may have finished first)")
+    await c.silence(3.0)
+
+    # a timer and a background task: their results reach the model as tool responses, and it should say them
+    n = len(c.events)
+    await c.say("timer", post_silence=5.0)
+    await c.say("delegate", post_silence=5.0)
+    calls = [e["name"] for e in c.events[n:] if e["type"] == "llm.tool_call"]
+    ck.warn("set_timer" in calls, f"it set a timer (tools called: {calls or 'none'})")
+    ck.warn("delegate_background_task" in calls, f"it handed work to the background model (tools called: {calls or 'none'})")
+    expected = {k for k, tool in (("background", "delegate_background_task"), ("timer", "set_timer")) if tool in calls}
+    t0, delivered = time.perf_counter(), set()
+    while time.perf_counter() - t0 < 240 and not expected <= delivered:
+        await c.silence(0.5)
+        delivered = {e["kind"] for e in c.events[n:] if e["type"] == "proactive"}
+    await c.silence(10.0)  # time to say it
+    for kind in sorted(expected):
+        at = next((i for i, e in enumerate(c.events) if i >= n and e["type"] == "proactive" and e["kind"] == kind), None)
+        said = "".join(e.get("delta", "") for e in c.events[at:] if e["type"] == "llm.content").strip() if at else ""
+        ck.warn(bool(said), f"the {kind} result reached the model, and then it said {said[:100]!r}" if at else
+                f"the {kind} result was never delivered")
+    await c.send({"type": "mic", "on": False})
+
+
 async def _listening(url: str) -> bool:
     try:
         async with httpx.AsyncClient(timeout=2, verify=False) as h:
@@ -232,7 +316,7 @@ async def _listening(url: str) -> bool:
         return False
 
 
-async def run(settings: Settings, url: str | None = None) -> int:
+async def run(settings: Settings, url: str | None = None, duplex_only: bool = False) -> int:
     import uvicorn
 
     from .server import create_app
@@ -274,7 +358,12 @@ async def run(settings: Settings, url: str | None = None) -> int:
         async with websockets.connect(ws_url, max_size=None) as ws:
             c = Client(ws, user_audio)
             try:
-                await conversation(c, ck)
+                if not duplex_only:
+                    await conversation(c, ck)
+                if settings.duplex.base_url:
+                    await duplex_conversation(c, ck)
+                elif duplex_only:
+                    ck.check(False, "--duplex needs DUPLEX_BASE_URL")
             except TimeoutError as e:
                 ck.check(False, f"timed out: {e}")
             finally:

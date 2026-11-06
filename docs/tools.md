@@ -1,19 +1,19 @@
 # Tools
 
-Both models can call tools. Each tool belongs to one or both *lanes*: `foreground`, `background`, or both
-(the default).
+Both models can call tools. Each tool belongs to one or more *lanes*: `foreground`, `background` (the
+default is both), and `duplex`, the full-duplex model, which is opt-in (see [duplex.md](duplex.md)).
 
 ## Built in
 
 | Tool | Lanes | What it does |
 |---|---|---|
-| `get_time` | both | local date and time |
+| `get_time` | all three | local date and time |
 | `calculate` | both | arithmetic, evaluated safely (no `eval`) |
 | `remember` / `recall` | both | notes for this session |
-| `get_weather` | both | current weather from Open-Meteo (no key) |
+| `get_weather` | all three | current weather from Open-Meteo (no key) |
 | `wikipedia` | both | a short Wikipedia summary |
-| `set_timer` | foreground | returns at once; when it fires, the agent tells you in its own turn |
-| `delegate_background_task` | foreground | hands a task to the background model and returns at once; the result is delivered in its own turn |
+| `set_timer` | foreground, duplex | returns at once; when it fires, the agent tells you in its own turn |
+| `delegate_background_task` | foreground, duplex | hands a task to the background model and returns at once; the result is delivered in its own turn |
 | `web_search` | background | DuckDuckGo results as Title / URL / Snippet |
 | `fetch_page` | background | a page as Markdown (main content, up to 16,000 characters), PDFs as text. Refuses private addresses on every redirect |
 
@@ -73,3 +73,19 @@ the task finishes, the result goes into a queue. A loop delivers it as soon as a
 It delivers by giving the foreground model a turn of its own. The model sees a
 `(Background event, not something the user said: …)` message with the result and says it in a sentence or
 two. Delivered turns are marked ★ in the waterfall and *proactive* in the Brain panel.
+
+## For the full-duplex model
+
+A tool joins full-duplex mode with `lanes=["foreground", "duplex"]` (or any lanes that include `duplex`).
+Keep the set small: the model reads its prompt one token per 80 ms step, and each tool adds a few seconds.
+
+The duplex model also reads a result one token per step, so short results answer sooner. If a result
+has a `spoken` field, the duplex model gets only that line; the other lanes still get the whole result.
+
+```python
+@tool(lanes=["foreground", "duplex"])
+def stock_level(sku: str) -> dict:
+    """How many of a product are in stock."""
+    n = 12
+    return {"sku": sku, "in_stock": n, "spoken": f"{n} in stock"}
+```

@@ -4,9 +4,11 @@
     background  streams with thinking on and calls a tool
     TTS -> ASR  speech made by the TTS comes back from the ASR as the same words
     VAD         hears that speech and not silence
+    duplex      (if set) opens a session with its prompt and tools, keeps up with real time, takes tool results
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 
@@ -141,6 +143,52 @@ async def speech_round_trip(settings: Settings, report: Report) -> None:
                f"speech frames {speechy:.0%}, max p on silence {quiet:.2f}")
 
 
+async def duplex_check(settings: Settings, report: Report) -> None:
+    from .duplex import DuplexLink, render_prompt
+    link = DuplexLink(settings.duplex)
+    prompt = render_prompt(settings.duplex_prompt, schemas("duplex"))
+    await link.resolve_model()
+    t0 = time.perf_counter()
+    try:
+        info = await link.open(prompt)
+    except Exception as e:  # noqa: BLE001
+        report.add("duplex: session", FAIL, f"{type(e).__name__}: {str(e)[:200]}", (time.perf_counter() - t0) * 1000)
+        await link.close()
+        return
+    report.add("duplex: session", OK, f"{link.model}, {len(prompt)} prompt chars"
+               + (" (already loaded)" if info.get("warm") else "; the model reads its prompt one token per step"),
+               (time.perf_counter() - t0) * 1000)
+    report.add("duplex: tool results", OK if link.tool_outputs else WARN,
+               "the server feeds tool results to the model" if link.tool_outputs else
+               "this server can't feed tool results back; run interaction-harness duplex-server")
+    frames, got = 50, 0
+    done = asyncio.Event()
+
+    async def count():
+        nonlocal got
+        async for ev in link.events():
+            if ev.get("type") == "response.audio.delta":
+                got += 1
+                if got >= frames:
+                    done.set()
+                    return
+
+    reader = asyncio.create_task(count())
+    t0 = time.perf_counter()
+    for _ in range(frames):  # 4 s of silence as fast as it will take it: how long does each 80 ms step take?
+        await link.send_audio(np.zeros(1280, np.int16))
+    try:
+        await asyncio.wait_for(done.wait(), 60)
+        per = (time.perf_counter() - t0) * 1000 / frames
+        report.add("duplex: speed", OK if per < 80 else FAIL,
+                   f"{per:.0f} ms per 80 ms frame ({80 / per:.1f}x real time)" + ("" if per < 80 else
+                   "; it can't keep up, so it will fall behind as you talk"), per * frames)
+    except TimeoutError:
+        report.add("duplex: speed", FAIL, f"only {got} of {frames} frames came back in 60 s")
+    reader.cancel()
+    await link.close()
+
+
 async def run(settings: Settings) -> int:
     report = Report()
     print("model roles", flush=True)
@@ -159,6 +207,9 @@ async def run(settings: Settings) -> int:
         await _chat_check(llm, report, "background", thinking=True)  # thinking on: its own check even on one server
     print("\nspeech", flush=True)
     await speech_round_trip(settings, report)
+    if settings.duplex.base_url:
+        print("\nfull-duplex", flush=True)
+        await duplex_check(settings, report)
     print(f"\n{'all checks passed' if not report.failed else f'{report.failed} check(s) failed'}"
           f"{'' if not any(r[1] == WARN for r in report.rows) else ' (with warnings)'}", flush=True)
     return 1 if report.failed else 0

@@ -86,3 +86,13 @@ def test_foreground_is_required_except_for_warmup():
 def test_missing_config_file_is_an_error():
     with pytest.raises(FileNotFoundError):
         settings(config_path="/nonexistent/ih.toml")
+
+
+def test_duplex_is_off_unless_given_an_endpoint_and_never_gets_another_roles_key():
+    s = settings({"FOREGROUND_API_KEY": "fg-key"})
+    assert s.duplex.base_url is None and "duplex" not in s.roles()
+    s = settings({"FOREGROUND_API_KEY": "fg-key", "DUPLEX_BASE_URL": "ws://box:8770/v1/"})
+    assert (s.duplex.base_url, s.duplex.api_key) == ("ws://box:8770/v1", NO_KEY)
+    assert "duplex" in s.roles()
+    with pytest.raises(ValueError, match="DUPLEX_BASE_URL"):
+        settings({"DUPLEX_BASE_URL": "box:8770"})

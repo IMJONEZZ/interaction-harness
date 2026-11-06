@@ -161,6 +161,17 @@ class LLM:
         ms = (time.perf_counter() - t0) * 1000
         return raw.startswith("COMPLETE"), ms, raw
 
+    async def one_sentence(self, text: str) -> str:
+        """Shorten an answer to one plain spoken sentence on the foreground endpoint (for the full-duplex model,
+        which reads tool results one token per 80 ms)."""
+        resp = await self.client.chat.completions.create(
+            model=self.s.foreground.model,
+            messages=[{"role": "system", "content": "Rewrite the answer as ONE short spoken sentence of at most 30 "
+                                                    "words: plain ASCII text, no markdown, keep the key numbers."},
+                      {"role": "user", "content": text}],
+            max_tokens=80, temperature=0.2, extra_body=thinking_body(self.s.foreground_thinking, False))
+        return (resp.choices[0].message.content or "").strip() or text[:200]
+
 
 def tool_result_message(call_id: str, name: str, result: Any) -> dict:
     return {"role": "tool", "tool_call_id": call_id, "name": name,

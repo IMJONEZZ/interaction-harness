@@ -19,10 +19,15 @@
   const cfg = { mode: 'semantic', barge_in: true, filler: true, foreground_thinking: false, voice: '', speed: 1.05, silence_ms: 700 };
   function pushConfig() { const c = { type: 'config', ...cfg }; if (!c.voice) delete c.voice; send(c); applyModeUI(); }
   function applyModeUI() {
+    const duplex = cfg.mode === 'duplex';
     document.querySelectorAll('#mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === cfg.mode));
     $('#btn-ptt').hidden = cfg.mode !== 'ptt';
     $('#lbl-silence').style.display = cfg.mode === 'vad' ? '' : 'none';
-    $('.panel.brain h2 small').textContent = `foreground · thinking ${cfg.foreground_thinking ? 'on' : 'off'} · tools · delegation`;
+    ['#cfg-barge', '#cfg-filler', '#cfg-think', '#cfg-voice', '#cfg-speed'].forEach((id) => { $(id).disabled = duplex; });
+    $('.panel.brain h2 small').textContent = duplex ? 'full-duplex model · hears and talks at once · tools · delegation'
+      : `foreground · thinking ${cfg.foreground_thinking ? 'on' : 'off'} · tools · delegation`;
+    $('.panel.ear h2 small').textContent = duplex ? 'Silero VAD (measuring only) → the model decides' : 'Silero VAD → ASR → end-of-turn';
+    $('.panel.mouth h2 small').textContent = duplex ? 'the model\'s own voice, streamed every 80 ms' : 'sentence-chunked TTS → browser playback';
   }
   document.querySelectorAll('#mode button').forEach((b) => b.onclick = () => { cfg.mode = b.dataset.mode; pushConfig(); });
   $('#cfg-barge').onchange = (e) => { cfg.barge_in = e.target.checked; pushConfig(); };
@@ -70,8 +75,12 @@
   window.addEventListener('keyup', (e) => { if (e.code === 'Space') ptt(false); });
 
   // ---------------------------------------------------------------- audio out
+  // TTS chunks are acknowledged one by one (start/end), so the server knows what you heard. The full-duplex
+  // model's audio is one continuous stream of 80 ms frames: played gaplessly behind a small jitter buffer, and
+  // only its silent -> voiced -> silent changes are reported, at the moment you hear them.
+  const STREAM_SILENT = 0xFFFFFFFE, STREAM_VOICED = 0xFFFFFFFF, JITTER_S = 0.12;
   const player = {
-    ctx: null, analyser: null, next: 0, sources: new Map(), pending: 0,
+    ctx: null, analyser: null, next: 0, sources: new Map(), pending: 0, streamNext: 0, streamSources: new Set(), voiced: false,
     ensure() {
       if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
       this.ctx = new AudioContext();
@@ -90,10 +99,26 @@
       setTimeout(() => { if (this.sources.has(id)) { send({ type: 'playback', event: 'start', id }); chunkState(id, 'playing'); } }, Math.max(0, (at - now) * 1000));
       src.onended = () => { if (!this.sources.has(id)) return; this.sources.delete(id); this.pending--; chunkState(id, 'done'); send({ type: 'playback', event: 'end', id }); if (this.pending === 0) send({ type: 'playback', event: 'drained' }); };
     },
-    stop() { for (const [id, s] of this.sources) { try { s.stop(); } catch (_) {} chunkState(id, 'dropped'); } this.sources.clear(); this.pending = 0; this.next = 0; }
+    playStream(sr, pcm, voiced) {
+      this.ensure();
+      const buf = this.ctx.createBuffer(1, pcm.length, sr); const ch = buf.getChannelData(0);
+      for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
+      const src = this.ctx.createBufferSource(); src.buffer = buf; src.connect(this.analyser);
+      const now = this.ctx.currentTime;
+      if (this.streamNext < now) this.streamNext = now + JITTER_S;   // underrun: rebuild the buffer
+      const at = this.streamNext; this.streamNext += buf.duration;
+      src.start(at); this.streamSources.add(src); src.onended = () => this.streamSources.delete(src);
+      if (voiced !== this.voiced) { this.voiced = voiced; setTimeout(() => send({ type: 'playback', event: 'voice', on: voiced }), Math.max(0, (at - now) * 1000)); }
+    },
+    stop() {
+      for (const [id, s] of this.sources) { try { s.stop(); } catch (_) {} chunkState(id, 'dropped'); } this.sources.clear(); this.pending = 0; this.next = 0;
+      for (const s of this.streamSources) { try { s.stop(); } catch (_) {} } this.streamSources.clear(); this.streamNext = 0;
+      if (this.voiced) { this.voiced = false; send({ type: 'playback', event: 'voice', on: false }); }
+    }
   };
   function onAudio(ab) {
     const dv = new DataView(ab); const id = dv.getUint32(0, true), sr = dv.getUint32(4, true);
+    if (id === STREAM_SILENT || id === STREAM_VOICED) { player.playStream(sr, new Int16Array(ab, 8), id === STREAM_VOICED); return; }
     player.play(id, sr, new Int16Array(ab, 8));
     chunkState(id, 'ready');
   }
@@ -114,11 +139,11 @@
 
   // ---------------------------------------------------------------- UI helpers
   const convo = $('#convo');
-  let curAssistant = null, curThink = null, curTurnSource = 'voice';
+  let curAssistant = null, curThink = null, curTurnSource = 'voice', userStartedAt = 0;
   const capChildren = (el, n) => { while (el.children.length > n) el.firstChild.remove(); };
   function bubble(role, text, cls = '') { const d = document.createElement('div'); d.className = `msg ${role} ${cls}`; d.textContent = text; convo.appendChild(d); capChildren(convo, 300); convo.scrollTop = convo.scrollHeight; return d; }
   function assistantBubble(source) {
-    curAssistant = document.createElement('div'); curAssistant.className = 'msg assistant' + (source === 'proactive' ? ' proactive' : '');
+    curAssistant = document.createElement('div'); curAssistant.className = 'msg assistant' + (source === 'proactive' ? ' proactive' : ''); curAssistant.dataset.t = Date.now();
     const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = source === 'proactive' ? 'proactive · agent-initiated turn' : 'assistant';
     curAssistant.appendChild(tag); curAssistant.appendChild(document.createTextNode('')); convo.appendChild(curAssistant); curThink = null;
   }
@@ -148,7 +173,8 @@
     { k: 'tts', from: 'first_sentence', to: 'tts_first', c: '#c98500', l: 'TTS first chunk' },
     { k: 'play', from: 'tts_first', to: 'first_audio', c: '#d55181', l: 'transport → playback' },
   ];
-  $('#legend').innerHTML = STAGES.map((s) => `<span><i style="background:${s.c}"></i>${s.l}</span>`).join('');
+  const DUPLEX_STAGES = [{ k: 'duplex', from: null, to: 'first_audio', c: '#8b6fd6', l: 'full-duplex model → first audio' }];
+  $('#legend').innerHTML = [...STAGES, ...DUPLEX_STAGES].map((s) => `<span><i style="background:${s.c}"></i>${s.l}</span>`).join('');
   const turns = new Map();
   function renderWaterfall() {
     const rows = [...turns.values()].slice(-8);
@@ -163,16 +189,16 @@
     s += '</g>';
     rows.forEach((m, r) => {
       const y = top + r * rowH;
-      s += `<text x="${left - 6}" y="${y + 13}" text-anchor="end">#${m.turn}${m.source === 'typed' ? '⌨' : m.source === 'proactive' ? '★' : ''}</text>`;
+      s += `<text x="${left - 6}" y="${y + 13}" text-anchor="end">#${m.turn}${m.source === 'typed' ? '⌨' : m.source === 'proactive' ? '★' : m.source === 'duplex' ? '⇄' : ''}</text>`;
       let prev = 0;
-      for (const st of STAGES) {
+      for (const st of m.source === 'duplex' ? DUPLEX_STAGES : STAGES) {
         const end = m.marks[st.to]; if (end == null) continue;
         const start = st.from ? (m.marks[st.from] ?? prev) : 0;
         if (end > start) s += `<rect class="seg" x="${x(start)}" y="${y + 2}" width="${Math.max(2, x(end) - x(start) - 1)}" height="${rowH - 6}" fill="${st.c}" data-tip="${esc(st.l)}: ${Math.round(end - start)} ms (${Math.round(start)}→${Math.round(end)})"></rect>`;
         prev = end;
       }
       const ttfa = m.marks.first_audio;
-      const lbl = ttfa != null ? `TTFA ${fmtMs(ttfa)}` : m.interrupted ? 'cut off' : m.marks.turn_end ? 'no audio' : '…';
+      const lbl = m.marks.overlap ? 'overlap' : ttfa != null ? `TTFA ${fmtMs(ttfa)}` : m.interrupted ? 'cut off' : m.marks.turn_end ? 'no audio' : '…';
       s += `<text x="${W - right + 6}" y="${y + 13}">${lbl}${m.interrupted ? ' ✂' : ''}</text>`;
     });
     $('#waterfall').innerHTML = s + '</svg>';
@@ -200,6 +226,7 @@
     hello(ev) {
       if (handlers._seenHello) { $('#convo').innerHTML = ''; $('#chunks').innerHTML = ''; $('#finals').innerHTML = ''; bgList.innerHTML = '<div class="empty">Reconnected: new session.</div>'; turns.clear(); $('#waterfall').innerHTML = '<div class="empty">No turns yet.</div>'; }
       handlers._seenHello = true;
+      $('#pill-duplex').hidden = $('#mode-duplex').hidden = !ev.roles.duplex;
       for (const [role, r] of Object.entries(ev.roles)) {
         const pill = $('#pill-' + role); if (!pill) continue;
         pill.textContent = `${role === 'asr' || role === 'tts' ? role.toUpperCase() : role} · ${r.model.split('/').pop()}`;
@@ -218,20 +245,24 @@
       if (ev.state === 'user_speaking') { $('#ep-verdict').textContent = '—'; $('#ep-fill').style.width = '0'; }
     },
     vad(ev) { $('#vad-bar').style.width = ev.p * 100 + '%'; $('#vad-lbl').textContent = 'VAD ' + ev.p.toFixed(2); wave.vad[(wave.i + wave.vad.length - 1) % wave.vad.length] = ev.p; },
-    'user.start'() { $('#partial').textContent = '…'; },
+    'user.start'() { $('#partial').textContent = '…'; userStartedAt = Date.now(); },
     'asr.partial'(ev) { $('#partial').textContent = (ev.text || '…') + `  ·  ${ev.audio_s}s · ${Math.round(ev.ms)} ms`; },
     'asr.final'(ev) {
       $('#partial').textContent = '';
-      const li = document.createElement('li'); li.innerHTML = `${esc(ev.text)}<span class="ms">${ev.model === 'typed' ? 'typed' : `${ev.audio_s}s audio → ${Math.round(ev.ms)} ms`}</span>`;
+      const li = document.createElement('li'); li.innerHTML = `${esc(ev.text)}<span class="ms">${ev.model === 'typed' ? 'typed' : ev.model === 'duplex' ? 'as the duplex model heard it' : `${ev.audio_s}s audio → ${Math.round(ev.ms)} ms`}</span>`;
       $('#finals').prepend(li); capChildren($('#finals'), 60);
-      if (!ev.text.startsWith('(Background event')) bubble('user', ev.text);
+      if (ev.text.startsWith('(Background event')) return;
+      const b = bubble('user', ev.text);
+      // full-duplex: the model may have answered before you finished; put what you said where you said it
+      const answer = ev.model === 'duplex' && [...convo.querySelectorAll('.msg.assistant')].find((d) => +d.dataset.t >= userStartedAt);
+      if (answer) convo.insertBefore(b, answer);
     },
     endpoint(ev) {
       if (ev.phase === 'judge') $('#ep-verdict').textContent = `${ev.verdict}  (${Math.round(ev.ms || 0)} ms, after ${ev.silence_ms ?? '?'} ms silence)  “${ev.text || ''}”`;
       else if (ev.phase === 'silence') $('#ep-verdict').textContent = ev.verdict;
       else if (ev.phase === 'resumed') $('#ep-verdict').textContent = 'user resumed — not done yet';
     },
-    'turn.start'(ev) { curTurnSource = ev.source; assistantBubble(ev.source); turns.set(ev.turn, { turn: ev.turn, source: ev.source, marks: {} }); renderWaterfall(); },
+    'turn.start'(ev) { curTurnSource = ev.source; assistantBubble(ev.source); if (ev.source !== 'duplex') { turns.set(ev.turn, { turn: ev.turn, source: ev.source, marks: {} }); renderWaterfall(); } },
     'llm.first_token'(ev) { $('#llm-stat').textContent = `TTFT ${Math.round(ev.ms)} ms`; },
     'llm.reasoning'(ev) { if (!curThink) curThink = thinkBlock('foreground'); curThink.textContent += ev.delta; curThink.scrollTop = curThink.scrollHeight; },
     'llm.content'(ev) { if (!curAssistant) assistantBubble(curTurnSource); curAssistant.lastChild.textContent += ev.delta; convo.scrollTop = convo.scrollHeight; },
@@ -266,11 +297,24 @@
     'background.done'(ev) { const c = taskCard(ev.id, 'background', `background task #${ev.id}`, ''); c.querySelector('.result').textContent = ev.result; c.querySelector('details').open = false; setStatus(c, `done in ${fmtMs(ev.ms)} · waiting for a gap`, 'done'); },
     'timer.set'(ev) { const c = taskCard(ev.id, 'timer', `timer #${ev.id}`, `${ev.label} — ${ev.seconds}s`, true); c.querySelector('details').remove(); setStatus(c, `fires in ${ev.seconds}s`, 'running'); },
     'timer.fired'(ev) { const c = document.getElementById('task-' + ev.id); if (c) setStatus(c, 'fired · waiting for a gap', 'done'); },
-    proactive(ev) { const c = document.getElementById('task-' + ev.id); if (c) setStatus(c, 'delivered proactively', 'delivered'); },
+    proactive(ev) { const c = document.getElementById('task-' + ev.id); if (c) setStatus(c, cfg.mode === 'duplex' ? 'handed to the duplex model' : 'delivered proactively', 'delivered'); },
+    'duplex.status'(ev) {
+      const pill = $('#pill-duplex');
+      const st = { loading: 'loading its prompt…', ready: `ready (${fmtMs(ev.load_ms)}${ev.tool_outputs ? '' : ', no tool results'})`, error: 'error', closed: 'closed' }[ev.state] || ev.state;
+      pill.classList.toggle('off', ev.state === 'error' || ev.state === 'closed');
+      pill.title = `full-duplex speech model — ${st}${ev.error ? ': ' + ev.error : ''}`;
+      if (cfg.mode === 'duplex') $('#llm-stat').textContent = `duplex ${st}`;
+    },
+    'duplex.utterance'(ev) {
+      if (!ev.text) return;
+      const li = document.createElement('li'); li.className = 'done'; li.innerHTML = `<span class="st"></span><span class="txt">${esc(ev.text)}</span><span class="m">duplex model</span>`;
+      $('#chunks').appendChild(li); capChildren($('#chunks'), 80); li.scrollIntoView({ block: 'nearest' });
+    },
+    'duplex.yield'(ev) { if (curAssistant) { const c = document.createElement('span'); c.className = 'cut'; c.textContent = ev.kept_talking ? ' ⇄ kept talking over you' : ` ✂ yielded ${fmtMs(ev.ms)} after you cut in`; curAssistant.appendChild(c); } },
     log() {}, pong() {},
   };
   function onEvent(ev) {
-    if (ev.type !== 'vad' && ev.type !== 'llm.content' && ev.type !== 'llm.reasoning' && ev.type !== 'background.reasoning' && ev.type !== 'background.content') log(ev);
+    if (ev.type !== 'vad' && ev.type !== 'llm.content' && ev.type !== 'llm.reasoning' && ev.type !== 'background.reasoning' && ev.type !== 'background.content' && !(ev.type === 'asr.partial' && ev.duplex)) log(ev);
     const h = handlers[ev.type]; if (h) h(ev);
   }
   connect();

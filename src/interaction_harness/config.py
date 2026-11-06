@@ -9,6 +9,10 @@ Every role reads <ROLE>_BASE_URL, <ROLE>_API_KEY and <ROLE>_MODEL. ASR and TTS r
 base URL is blank or "local"; BACKGROUND falls back to FOREGROUND field by field; FOREGROUND falls back to
 OPENAI_BASE_URL / OPENAI_API_KEY. VAD is not a role: it runs on every 32 ms frame, in-process.
 
+One more role is optional, and replaces ASR, the foreground model and TTS when the dashboard switches to it:
+
+    DUPLEX      a full-duplex speech model  ws {base}/realtime      (see duplex.py)
+
 Precedence, highest first: command-line flags, environment, .env in the working directory, the TOML file
 (--config, or ./interaction-harness.toml when it exists).
 """
@@ -59,6 +63,7 @@ class Settings:
     background: Endpoint
     asr: Endpoint
     tts: Endpoint
+    duplex: Endpoint = field(default_factory=lambda: Endpoint("duplex", None, NO_KEY, ""))  # base_url None: off
     foreground_thinking: str = "chat_template_kwargs"
     background_thinking: str = "chat_template_kwargs"
     background_temperature: float = 0.7
@@ -77,6 +82,7 @@ class Settings:
     foreground_prompt: str = prompts.FOREGROUND_SYSTEM
     background_prompt: str = prompts.BACKGROUND_SYSTEM
     end_of_turn_prompt: str = prompts.END_OF_TURN_SYSTEM
+    duplex_prompt: str = prompts.DUPLEX_SYSTEM
     tools_files: list[str] = field(default_factory=list)
     save_utterances: str | None = None   # directory: keep a WAV of every user turn the ASR heard
     host: str = "127.0.0.1"
@@ -85,7 +91,10 @@ class Settings:
     ssl_keyfile: str | None = None
 
     def roles(self) -> dict[str, Endpoint]:
-        return {"asr": self.asr, "tts": self.tts, "foreground": self.foreground, "background": self.background}
+        roles = {"asr": self.asr, "tts": self.tts, "foreground": self.foreground, "background": self.background}
+        if self.duplex.base_url:
+            roles["duplex"] = self.duplex
+        return roles
 
 
 def _same_host(a: str, b: str) -> bool:
@@ -160,7 +169,11 @@ def load_settings(flags: dict[str, Any] | None = None, *, config_path: str | Non
     asr = Endpoint("asr", asr_url, key_for("ASR", asr_url), get("ASR_MODEL", default=""))
     tts = Endpoint("tts", tts_url, key_for("TTS", tts_url), get("TTS_MODEL", default=""))
 
-    s = Settings(foreground=foreground, background=background, asr=asr, tts=tts)
+    dx_url = get("DUPLEX_BASE_URL")
+    dx_url = None if dx_url is None or dx_url.lower() == "off" else dx_url.rstrip("/")
+    duplex = Endpoint("duplex", dx_url, key_for("DUPLEX", dx_url), get("DUPLEX_MODEL", default=""))
+
+    s = Settings(foreground=foreground, background=background, asr=asr, tts=tts, duplex=duplex)
     s.foreground_thinking = get("FOREGROUND_THINKING", default=s.foreground_thinking)
     # same server as the foreground: same way of switching thinking, unless told otherwise
     s.background_thinking = get("BACKGROUND_THINKING", default=s.foreground_thinking if bg_url == fg_url
@@ -181,6 +194,7 @@ def load_settings(flags: dict[str, Any] | None = None, *, config_path: str | Non
     s.foreground_prompt = get("FOREGROUND_PROMPT", default=s.foreground_prompt)
     s.background_prompt = get("BACKGROUND_PROMPT", default=s.background_prompt)
     s.end_of_turn_prompt = get("END_OF_TURN_PROMPT", default=s.end_of_turn_prompt)
+    s.duplex_prompt = get("DUPLEX_PROMPT", default=s.duplex_prompt)
     s.tools_files = [p.strip() for p in (get("TOOLS") or "").split(",") if p.strip()]
     s.save_utterances = get("SAVE_UTTERANCES")
     s.host = get("HOST", default=s.host)
@@ -205,6 +219,8 @@ def validate(s: Settings, require_foreground: bool = True) -> None:
         raise ValueError(f"PARAKEET_ONNX_VARIANT must be fp32 or int8; got {s.parakeet_onnx_variant!r}")
     if s.kokoro_onnx_variant not in ("fp32", "fp16", "int8"):
         raise ValueError(f"KOKORO_ONNX_VARIANT must be fp32, fp16 or int8; got {s.kokoro_onnx_variant!r}")
+    if s.duplex.base_url and not s.duplex.base_url.startswith(("ws://", "wss://", "http://", "https://")):
+        raise ValueError(f"DUPLEX_BASE_URL must start with ws://, wss://, http:// or https://; got {s.duplex.base_url!r}")
     if require_foreground and not s.foreground.base_url:
         raise ValueError("No foreground model server. Set FOREGROUND_BASE_URL (or OPENAI_BASE_URL) to any "
                          "OpenAI-compatible endpoint, e.g. http://127.0.0.1:8080/v1")

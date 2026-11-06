@@ -14,7 +14,7 @@ body:
       label: Roles
       description: Which roles did this server play?
       multiple: true
-      options: [ASR, TTS, foreground, background]
+      options: [ASR, TTS, foreground, background, duplex]
     validations:
       required: true
   - type: input

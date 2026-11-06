@@ -1,9 +1,10 @@
 """interaction-harness command line.
 
-    interaction-harness serve      the dashboard on http://localhost:8765
-    interaction-harness doctor     check all four model roles and report each one's latency
-    interaction-harness selftest   talk to the agent with synthesized speech and check every behaviour
-    interaction-harness warmup     download and load the in-process speech models, then exit
+    interaction-harness serve          the dashboard on http://localhost:8765
+    interaction-harness doctor         check every model role and report each one's latency
+    interaction-harness selftest       talk to the agent with synthesized speech and check every behaviour
+    interaction-harness warmup         download and load the in-process speech models, then exit
+    interaction-harness duplex-server  serve a full-duplex speech model for DUPLEX_BASE_URL (Apple Silicon)
 
 Every subcommand takes the same settings flags; anything not given comes from the environment, .env, or
 interaction-harness.toml (see .env.example). API keys come from the environment or files, never from flags,
@@ -21,13 +22,14 @@ import webbrowser
 from . import __version__
 from .config import LOCAL_BACKENDS, THINKING_MODES, Settings, load_settings
 
-ROLES = ("foreground", "background", "asr", "tts")
+ROLES = ("foreground", "background", "asr", "tts", "duplex")
 
 
 def _add_settings_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--config", metavar="FILE", help="TOML settings (default: ./interaction-harness.toml if present)")
     g = p.add_argument_group("model roles", "each role is any OpenAI-compatible endpoint; ASR/TTS run "
-                                            "in-process when their base URL is blank or 'local'")
+                                            "in-process when their base URL is blank or 'local'; duplex "
+                                            "(optional) is a ws:// full-duplex speech endpoint")
     for role in ROLES:
         g.add_argument(f"--{role}-base-url", metavar="URL")
         g.add_argument(f"--{role}-model", metavar="NAME")
@@ -97,12 +99,17 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
 def cmd_selftest(args: argparse.Namespace) -> None:
     from .selftest import run
-    sys.exit(asyncio.run(run(_settings(args), url=args.url)))
+    sys.exit(asyncio.run(run(_settings(args), url=args.url, duplex_only=args.duplex)))
 
 
 def cmd_warmup(args: argparse.Namespace) -> None:
     from .doctor import warmup
     sys.exit(asyncio.run(warmup(_settings(args, require_foreground=False))))
+
+
+def cmd_duplex_server(args: argparse.Namespace) -> None:
+    from .duplex_server import serve
+    serve(model=args.model, host=args.host, port=args.port, log_functions=args.log_functions)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -126,11 +133,21 @@ def main(argv: list[str] | None = None) -> None:
     _add_settings_flags(p)
     p.add_argument("--url", help="WebSocket of a running server (default: ws://127.0.0.1:<port>/ws, started "
                                  "in-process if nothing is listening)")
+    p.add_argument("--duplex", action="store_true", help="only the full-duplex part (needs DUPLEX_BASE_URL)")
     p.set_defaults(fn=cmd_selftest)
 
     p = sub.add_parser("warmup", help="download and load the in-process speech models, then exit")
     _add_settings_flags(p)
     p.set_defaults(fn=cmd_warmup)
+
+    from .duplex_server import DEFAULT_MODEL, DEFAULT_PORT
+    p = sub.add_parser("duplex-server", help="serve a full-duplex speech model with tool results (Apple Silicon; "
+                                             "needs the duplex extra)")
+    p.add_argument("--model", default=DEFAULT_MODEL, help=f"MLX VoiceChat model (default {DEFAULT_MODEL})")
+    p.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
+    p.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port (default {DEFAULT_PORT})")
+    p.add_argument("--log-functions", action="store_true", help="print the model's tool-call channel, frame by frame")
+    p.set_defaults(fn=cmd_duplex_server)
 
     args = parser.parse_args(argv)
     args.fn(args)

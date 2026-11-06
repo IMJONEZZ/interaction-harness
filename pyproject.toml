@@ -51,6 +51,9 @@ dependencies = [
 [project.optional-dependencies]
 # ONNX on an NVIDIA GPU. CPU is the default and the tested path.
 onnx-gpu = ["onnxruntime-gpu>=1.18"]
+# `interaction-harness duplex-server`: a full-duplex speech model on Apple Silicon. Pinned exactly, because the
+# server feeds tool results through two private fields of mlx-vlm's VoiceChat session.
+duplex = ["mlx-vlm==0.7.12; sys_platform == 'darwin' and platform_machine == 'arm64'"]
 
 [project.urls]
 Homepage = "https://github.com/IMJONEZZ/interaction-harness"

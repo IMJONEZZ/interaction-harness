@@ -38,6 +38,8 @@ tool it picks; those are warnings, not failures.
 | `src/interaction_harness/session.py` | the interaction model: state machine, endpointing, barge-in, both models, proactive delivery |
 | `src/interaction_harness/config.py` | settings and the four roles |
 | `src/interaction_harness/llm.py` | the chat roles, the thinking switch, the end-of-turn judge |
+| `src/interaction_harness/duplex.py` | full-duplex mode: the client, tool calls and results, and what it measures |
+| `src/interaction_harness/duplex_server.py` | `duplex-server`: VoiceChat on mlx-vlm, plus tool results |
 | `src/interaction_harness/speech/` | VAD, and ASR and TTS on MLX, ONNX or an endpoint |
 | `src/interaction_harness/tools/` | the tool registry, built-in tools, web search and fetch |
 | `src/interaction_harness/static/` | the dashboard: vanilla JS, no build step |

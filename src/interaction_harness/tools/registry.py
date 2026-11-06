@@ -7,6 +7,11 @@
         "Flip a coin."
         return random.choice(["heads", "tails"])
 
+    @tool(lanes=["foreground", "duplex"])   # also offered to the full-duplex model
+    def lights(on: bool) -> str:
+        "Turn the lights on or off."
+        ...
+
     @tool(lanes=["background"])
     async def search_tickets(query: Annotated[str, "words to look for"], limit: int = 5) -> list[dict]:
         "Search the support ticket system."
@@ -31,7 +36,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-LANES = ("foreground", "background")
+LANES = ("foreground", "background", "duplex")
+DEFAULT_LANES = ("foreground", "background")  # duplex is opt-in: each tool lengthens its prompt, and so its load time
 _JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean", list: "array", dict: "object"}
 
 
@@ -99,7 +105,7 @@ def infer_parameters(fn: Callable) -> tuple[dict, bool]:
 
 
 def tool(fn: Callable | None = None, *, name: str | None = None, description: str | None = None,
-         parameters: dict | None = None, lanes: typing.Iterable[str] = LANES):
+         parameters: dict | None = None, lanes: typing.Iterable[str] = DEFAULT_LANES):
     """Register a function as a tool. Usable bare (@tool) or with options (@tool(lanes=["background"]))."""
 
     def register(f: Callable) -> Callable:
