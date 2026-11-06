@@ -16,6 +16,14 @@ model that listens and talks at once.
 llama.cpp as both foreground and background. The user's lines are spoken by Kokoro through Chrome's fake
 microphone. Real time, no cuts.</sub>
 
+https://github.com/user-attachments/assets/d6cbe4ec-d2e1-42f4-988e-713cda2e2066
+
+<sub>With sound: a person talking to it, recorded with the dashboard's record button. First the cascade
+(semantic end-of-turn): the weather, a mortgage question handed to the background model with a question
+about the time in between, and the background answer brought up on its own, then cut off. Then
+full-duplex: a name for a goldfish, and a timer. The recording is cut at the end, where the full-duplex
+model started talking about cities nobody had mentioned (see [docs/duplex.md](docs/duplex.md)).</sub>
+
 ## What it shows
 
 - **Turn-taking you can switch mid-conversation.** Push-to-talk, a VAD silence timeout, or *semantic
