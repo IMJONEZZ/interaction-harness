@@ -104,6 +104,10 @@ Settings come from flags, then the environment, then `.env` in the working direc
    background model's reasoning, and when it's done and you go quiet, the agent brings it up on its own.
 5. Switch to **VAD timeout** and repeat step 1, then compare the endpointing segment in the waterfall.
 
+To record a session with sound, open the dashboard at `/?record` (for example http://localhost:8765/?record),
+press **⏺ Record** and share this tab. It saves a `.webm` of the tab with your microphone and the agent's
+voice mixed in.
+
 ## Commands
 
 | Command | What it does |

@@ -41,7 +41,7 @@
   $('#typed').onsubmit = (e) => { e.preventDefault(); const t = $('#typed-in').value.trim(); if (t) { send({ type: 'text', text: t }); $('#typed-in').value = ''; } };
 
   // ---------------------------------------------------------------- mic in
-  let micCtx, micNode, micStream, micOn = false;
+  let micCtx, micNode, micStream, micOn = false, onMicStream = null;
   const wave = { rms: new Float32Array(240), vad: new Float32Array(240), i: 0 };
   async function startMic() {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -54,6 +54,7 @@
       wave.rms[wave.i] = e.data.rms; wave.i = (wave.i + 1) % wave.rms.length;
     };
     src.connect(micNode); // no connection to destination: we never play the mic
+    if (onMicStream) onMicStream();
     micOn = true; $('#btn-mic').textContent = '⏹ Stop mic'; $('#btn-mic').classList.add('on');
     send({ type: 'mic', on: true });
     player.ensure();
@@ -121,6 +122,35 @@
     if (id === STREAM_SILENT || id === STREAM_VOICED) { player.playStream(sr, new Int16Array(ab, 8), id === STREAM_VOICED); return; }
     player.play(id, sr, new Int16Array(ab, 8));
     chunkState(id, 'ready');
+  }
+
+  // ---------------------------------------------------------------- recording (open the page with ?record)
+  // This tab's video, with your mic and the agent's voice mixed into one track, saved as a .webm.
+  if (new URLSearchParams(location.search).has('record')) {
+    const btn = document.createElement('button'); btn.className = 'btn'; btn.textContent = '⏺ Record';
+    $('.toolbar').insertBefore(btn, $('#btn-stop'));
+    let rec = null, mix = null, micTap = null, agentGain = null, parts = [];
+    const gain = (v) => { const g = player.ctx.createGain(); g.gain.value = v; g.connect(mix); return g; };  // headroom: two voices can overlap
+    onMicStream = () => { if (!mix) return; if (micTap) micTap.disconnect(); micTap = player.ctx.createMediaStreamSource(micStream); micTap.connect(gain(0.7)); };
+    btn.onclick = async () => {
+      if (rec) { rec.stop(); return; }
+      let screen;
+      try { screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false, preferCurrentTab: true, selfBrowserSurface: 'include' }); }
+      catch (e) { log({ type: 'log', level: 'error', text: 'record: ' + e.message }); return; }
+      player.ensure(); mix = player.ctx.createMediaStreamDestination(); agentGain = gain(0.7); player.analyser.connect(agentGain);
+      if (micStream) onMicStream();
+      const type = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t));
+      parts = []; rec = new MediaRecorder(new MediaStream([...screen.getVideoTracks(), ...mix.stream.getAudioTracks()]), { mimeType: type });
+      rec.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
+      rec.onstop = () => {
+        screen.getTracks().forEach((t) => t.stop()); player.analyser.disconnect(agentGain); if (micTap) micTap.disconnect(); micTap = mix = rec = agentGain = null;
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(parts, { type: 'video/webm' }));
+        a.download = `interaction-harness-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.webm`; a.click();
+        btn.textContent = '⏺ Record'; btn.classList.remove('warn');
+      };
+      screen.getVideoTracks()[0].onended = () => { if (rec) rec.stop(); };
+      rec.start(1000); btn.textContent = '⏹ Stop recording'; btn.classList.add('warn');
+    };
   }
 
   // ---------------------------------------------------------------- waveform
