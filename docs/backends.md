@@ -27,6 +27,10 @@ On an M5 Max CPU, the int8 variants gave the same transcripts as fp32 in our che
 | Parakeet | 4.3 s | 115 ms | 100 ms |
 | Kokoro | 2.7 s | 545 ms | 231 ms |
 
+On small CPUs, TTS is what limits latency. On GitHub's standard Linux runner (x86_64), Kokoro int8 took 3.9 s
+to synthesize 5.6 s of audio (RTF 0.69). That is faster than real time, but slow to the first word. On a
+machine like that, point `TTS_BASE_URL` at a GPU-backed speech server.
+
 ## GPUs with ONNX
 
 CPU is the default and the tested path. The GPU path is **untested**. To try it:
