@@ -69,7 +69,7 @@ Headphones make barge-in reliable.
 picked automatically. Models download on first use.
 
 ```bash
-uv tool install git+https://github.com/IMJONEZZ/interaction-harness
+uv tool install interaction-harness
 interaction-harness doctor --foreground-base-url http://127.0.0.1:8080/v1   # checks every role
 interaction-harness serve  --foreground-base-url http://127.0.0.1:8080/v1 --open
 ```

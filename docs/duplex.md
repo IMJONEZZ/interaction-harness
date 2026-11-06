@@ -14,7 +14,7 @@ Full-duplex runs on Apple Silicon today, with NVIDIA's
 full-duplex model that calls tools.
 
 ```bash
-uv tool install "interaction-harness[duplex] @ git+https://github.com/IMJONEZZ/interaction-harness"
+uv tool install "interaction-harness[duplex]"
 interaction-harness duplex-server                 # downloads the model once; ws://127.0.0.1:8770/v1/realtime
 interaction-harness serve --duplex-base-url ws://127.0.0.1:8770/v1 --open
 ```
