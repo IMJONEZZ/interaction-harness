@@ -1,0 +1,29 @@
+name: publish
+
+# Publishing a GitHub release uploads that version to PyPI. PyPI trusts this workflow directly (a
+# "trusted publisher"), so no token is stored anywhere.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: The tag matches the package version
+        if: github.event_name == 'release'
+        run: |
+          version=$(uv version --short)
+          test "${GITHUB_REF_NAME}" = "v${version}" || { echo "tag ${GITHUB_REF_NAME} != v${version}"; exit 1; }
+      - name: Build
+        run: uv build
+      - name: Check the PyPI page renders
+        run: uvx twine check dist/*
+      - name: Publish
+        run: uv publish --trusted-publishing always
