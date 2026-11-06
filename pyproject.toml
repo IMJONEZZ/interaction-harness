@@ -1,0 +1,87 @@
+[project]
+name = "interaction-harness"
+version = "0.1.0"
+description = "A voice agent whose interaction model (turn-taking, barge-in, background work) is visible and swappable"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "src/interaction_harness/speech/assets/SILERO_VAD_LICENSE"]
+authors = [{ name = "Chris Brousseau" }]
+requires-python = ">=3.11,<3.14"
+keywords = ["voice agent", "turn-taking", "barge-in", "end-of-turn", "speech", "llm", "openai-compatible"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    # server + transport
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "websockets>=13",
+    "python-dotenv>=1.0",
+    "httpx>=0.27",
+    # every model role speaks the OpenAI API
+    "openai>=1.66",
+    # audio + VAD (Silero runs on onnxruntime; no torch needed)
+    "numpy>=1.26",
+    "soundfile>=0.12",
+    "onnxruntime>=1.18",
+    # background tools
+    "ddgs>=9",
+    "pypdf>=5",
+    # local speech, everywhere: Parakeet and Kokoro on ONNX
+    "onnx-asr[hub]>=0.10",
+    "kokoro-onnx>=0.4",
+    # local speech, Apple Silicon: the same models on MLX
+    "parakeet-mlx>=0.5; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-audio>=0.5; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "misaki[en]>=0.9; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[project.optional-dependencies]
+# ONNX on an NVIDIA GPU. CPU is the default and the tested path.
+onnx-gpu = ["onnxruntime-gpu>=1.18"]
+
+[project.urls]
+Homepage = "https://github.com/IMJONEZZ/interaction-harness"
+Source = "https://github.com/IMJONEZZ/interaction-harness"
+Issues = "https://github.com/IMJONEZZ/interaction-harness/issues"
+
+[project.scripts]
+interaction-harness = "interaction_harness.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/interaction_harness"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "E701", "E702", "E731", "B008"]  # long lines: prompts and the original code read better unwrapped

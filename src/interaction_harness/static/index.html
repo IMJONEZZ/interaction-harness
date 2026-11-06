@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>interaction-harness</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="title">interaction-harness</div>
+    <div class="sub">a voice agent whose turn-taking, barge-in and background work are visible</div>
+  </div>
+  <div class="pills">
+    <span class="pill" id="pill-asr" title="speech → text">ASR · —</span>
+    <span class="pill" id="pill-tts" title="text → speech">TTS · —</span>
+    <span class="pill" id="pill-foreground" title="holds the conversation; judges end-of-turn">foreground · —</span>
+    <span class="pill" id="pill-background" title="works on handed-off tasks">background · —</span>
+    <span class="pill ws" id="pill-ws">socket · connecting</span>
+  </div>
+</header>
+
+<section class="toolbar">
+  <button id="btn-mic" class="btn primary">🎙 Start mic</button>
+  <button id="btn-ptt" class="btn ptt" hidden>Hold to talk <kbd>space</kbd></button>
+  <div class="seg" id="mode">
+    <button data-mode="ptt" title="Half-duplex: you commit the turn">Push-to-talk</button>
+    <button data-mode="vad" title="Silero VAD + fixed silence timeout">VAD timeout</button>
+    <button data-mode="semantic" class="on" title="VAD + LLM end-of-turn judge">Semantic EOT</button>
+  </div>
+  <label class="tog"><input type="checkbox" id="cfg-barge" checked> barge-in</label>
+  <label class="tog"><input type="checkbox" id="cfg-filler" checked> filler</label>
+  <label class="tog"><input type="checkbox" id="cfg-think"> foreground thinking</label>
+  <label class="sel">voice <select id="cfg-voice"></select></label>
+  <label class="sel">speed <input type="number" id="cfg-speed" min="0.7" max="1.5" step="0.05" value="1.05"></label>
+  <label class="sel" id="lbl-silence">silence <input type="number" id="cfg-silence" min="200" max="3000" step="50" value="700"> ms</label>
+  <form id="typed" class="typed"><input id="typed-in" placeholder="…or type a message" autocomplete="off"><button class="btn">Send</button></form>
+  <button id="btn-stop" class="btn warn">■ Stop</button>
+  <button id="btn-reset" class="btn ghost">Reset</button>
+</section>
+
+<main class="grid">
+  <!-- EAR -->
+  <section class="panel ear">
+    <h2><span class="dot ear"></span>Ear <small>Silero VAD → ASR → end-of-turn</small></h2>
+    <div class="states" id="states">
+      <span data-s="idle">idle</span><span data-s="listen">listen</span><span data-s="user_speaking">user speaking</span>
+      <span data-s="endpointing">endpointing</span><span data-s="think">think</span><span data-s="speak">speak</span>
+    </div>
+    <canvas id="wave" height="90"></canvas>
+    <div class="meter"><div class="meter-bar" id="vad-bar"></div><div class="meter-thresh" id="vad-thresh"></div><span class="meter-lbl" id="vad-lbl">VAD 0.00</span></div>
+    <div class="endpoint" id="endpoint">
+      <div class="ep-row"><span class="k">silence</span><div class="ep-bar"><div id="ep-fill"></div></div><span class="v" id="ep-ms">0 ms</span></div>
+      <div class="ep-row"><span class="k">judge</span><span class="v" id="ep-verdict">—</span></div>
+    </div>
+    <div class="transcript">
+      <div class="partial" id="partial"></div>
+      <ul id="finals"></ul>
+    </div>
+  </section>
+
+  <!-- BRAIN -->
+  <section class="panel brain">
+    <h2><span class="dot brain"></span>Brain <small>foreground · thinking off · tools · delegation</small>
+      <span class="stat" id="llm-stat">—</span></h2>
+    <div class="convo" id="convo"></div>
+  </section>
+
+  <!-- MOUTH + BACKGROUND -->
+  <section class="panel mouth">
+    <h2><span class="dot mouth"></span>Mouth <small>sentence-chunked TTS → browser playback</small></h2>
+    <div class="meter out"><div class="meter-bar" id="out-bar"></div><span class="meter-lbl" id="out-lbl">out</span></div>
+    <ul class="chunks" id="chunks"></ul>
+  </section>
+  <section class="panel bg">
+    <h2><span class="dot bg"></span>Background <small>background model · thinking on · proactive delivery</small></h2>
+    <div id="bg-list" class="bg-list"><div class="empty">Ask for something that needs real thinking — “compare three ways to…”, “plan a…”, “remind me in 20 seconds”.</div></div>
+  </section>
+
+  <!-- LATENCY -->
+  <section class="panel latency">
+    <h2><span class="dot lat"></span>Turn latency <small>from end of your speech to first audio</small>
+      <span class="stat" id="ttfa">—</span></h2>
+    <div class="legend" id="legend"></div>
+    <div id="waterfall" class="waterfall"><div class="empty">No turns yet.</div></div>
+  </section>
+
+  <section class="panel log">
+    <h2><span class="dot log"></span>Events <small>everything the pipeline emits</small></h2>
+    <div id="log" class="log"></div>
+  </section>
+</main>
+<div id="tip" class="tip" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

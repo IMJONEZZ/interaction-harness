@@ -1,0 +1,25 @@
+# secrets and local settings
+.env
+.env.*
+!.env.example
+interaction-harness.toml
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# runtime output
+utterances/
+*.log
+*.pid
+
+# editors and OS
+.DS_Store
+.idea/
+.vscode/
