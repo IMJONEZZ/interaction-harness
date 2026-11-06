@@ -20,12 +20,12 @@ ONNX on a Mac to compare the two.
 | `PARAKEET_ONNX_VARIANT` | `int8`, `fp32` | `int8` | 639 MB (fp32: 2.4 GB) |
 | `KOKORO_ONNX_VARIANT` | `int8`, `fp16`, `fp32` | `int8` | 97 MB + 27 MB of voices (fp32: 321 MB) |
 
-On an M5 Max CPU, the int8 variants gave the same transcripts as fp32 in our checks:
+On an M5 Max CPU, the int8 variants gave the same transcripts as fp32 in our checks. Warm timings:
 
 | Model | Audio | fp32 | int8 |
 |---|---|---|---|
-| Parakeet | 4.3 s | 115 ms | 100 ms |
-| Kokoro | 2.7 s | 545 ms | 231 ms |
+| Parakeet | 4.3 s | 73 ms | 57 ms |
+| Kokoro | 2.7 s | 350 ms | 197 ms |
 
 On small CPUs, TTS is what limits latency. On GitHub's standard Linux runner (x86_64), Kokoro int8 took 3.9 s
 to synthesize 5.6 s of audio (RTF 0.69). That is faster than real time, but slow to the first word. On a

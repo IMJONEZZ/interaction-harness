@@ -12,7 +12,7 @@ also run in-process, on Apple Silicon (MLX) or anywhere else (ONNX).
 
 <sub>A real session on one Mac, every model live: Parakeet and Kokoro in-process, Qwen3.6-35B-A3B on
 llama.cpp as both foreground and background. The user's lines are spoken by Kokoro through Chrome's fake
-microphone. Shown at 2× speed.</sub>
+microphone. Real time, no cuts.</sub>
 
 ## What it shows
 
@@ -136,17 +136,19 @@ Latency here is the time from the end of your speech to the first audio, as the 
 That includes 300 ms of silence before the judge is asked, then the judge, ASR, the foreground model's
 first sentence, and the first TTS chunk.
 
-The numbers below are the median of 5 short spoken turns with no tools, in semantic mode. They were
-measured on an M5 Max MacBook Pro, with Qwen3.6-35B-A3B (UD-Q8_K_XL, llama.cpp via Unsloth Studio) as the
-foreground model.
+The numbers below are the median of 10 short spoken turns with no tools, in semantic mode. They were
+measured on an M5 Max MacBook Pro, plugged in and otherwise idle, with Qwen3.6-35B-A3B (UD-Q8_K_XL,
+llama.cpp via Unsloth Studio) as the foreground model.
 
 | Speech | Median | Range |
 |---|---|---|
-| In-process MLX | 855 ms | 751–1,683 ms |
-| ASR + TTS on an endpoint (mlx-audio server, same machine) | 1,158 ms | 770–1,500 ms |
-| In-process ONNX on CPU (int8) | 1,506 ms | 1,204–1,957 ms |
+| In-process MLX | 908 ms | 741–1,780 ms |
+| In-process ONNX on CPU (int8) | 909 ms | 795–1,571 ms |
+| ASR + TTS on an endpoint (mlx-audio server, same machine) | 787 ms | 734–1,060 ms |
 
-Turns that call a tool add a model round trip; the waterfall shows each segment.
+On a machine this fast the three are within noise of each other. About 500 ms of a typical turn is deciding
+that you've finished: the 300 ms of silence, then the judge. That is the place to tune first. Turns that
+call a tool add a model round trip; the waterfall shows each segment.
 
 ## Tested with
 
