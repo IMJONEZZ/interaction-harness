@@ -1,0 +1,34 @@
+name: Bug report
+description: Something doesn't work the way the README says it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: events
+    attributes:
+      label: Events or logs
+      description: |
+        The relevant lines from the dashboard's Events panel or the server's terminal. If it's about speech
+        or turn-taking, setting `SAVE_UTTERANCES=DIR` keeps a WAV of each turn the ASR heard.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `interaction-harness --version`.
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Setup
+      description: OS and hardware, which roles are in-process or on an endpoint, and which servers and models.
+      placeholder: e.g. macOS 26, M4 Pro; speech in-process (MLX); foreground llama.cpp with Qwen3-8B
+    validations:
+      required: true

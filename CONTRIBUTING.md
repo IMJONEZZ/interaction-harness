@@ -3,7 +3,9 @@
 Issues and pull requests are welcome. The most useful contributions are:
 
 - **Server reports.** Run `interaction-harness doctor` against a server not yet in the README's "Tested
-  with" table (Ollama, LM Studio, OpenAI, Speaches, Kokoro-FastAPI, …) and open an issue with the output.
+  with" table (OpenAI, Speaches, Kokoro-FastAPI, …) and file a
+  [server report](https://github.com/IMJONEZZ/interaction-harness/issues/new?template=server-report.yml)
+  with the output.
 - **Backends.** In-process speech on other hardware or with other models. See
   [docs/backends.md](docs/backends.md).
 - **Interaction-model experiments.** New end-of-turn policies, backchannel handling, or better barge-in

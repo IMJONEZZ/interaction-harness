@@ -1,0 +1,61 @@
+name: Server report
+description: You ran the harness against a model server. Tell us whether it worked.
+title: "Server report: "
+labels: [server report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Reports like this fill in the README's "Tested with" table. Run `interaction-harness doctor` with your
+        settings first; it checks each role on its own and prints what to paste below.
+  - type: dropdown
+    id: roles
+    attributes:
+      label: Roles
+      description: Which roles did this server play?
+      multiple: true
+      options: [ASR, TTS, foreground, background]
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Server and version
+      placeholder: e.g. vLLM 0.13.1, Speaches 0.9, OpenAI API
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      placeholder: e.g. Qwen/Qwen3-8B
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware and OS
+      placeholder: e.g. RTX 4090, Ubuntu 24.04
+  - type: dropdown
+    id: result
+    attributes:
+      label: Did it work?
+      options:
+        - "Yes: doctor passes and conversation works"
+        - "Partly: some checks warn or fail"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: doctor output
+      description: The output of `interaction-harness doctor`. Remove any keys or private hostnames.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Settings you needed (thinking switch, server flags), and anything else worth knowing.

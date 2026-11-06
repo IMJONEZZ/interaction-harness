@@ -161,7 +161,8 @@ call a tool add a model round trip; the waterfall shows each segment.
 | in-process speech | ONNX on CPU, macOS arm64 | tested: `doctor`, `selftest` |
 | in-process speech | ONNX on CPU, Linux x86_64 | tested in CI: `warmup` round trip |
 | in-process speech | ONNX on CPU, Linux arm64 (DGX Spark) | not yet tested |
-| any role | Ollama, LM Studio, OpenAI, Speaches, Kokoro-FastAPI, other servers | untested; should work if they implement the endpoint. Run `doctor`, and please report what you find |
+| foreground, background | Ollama, LM Studio | built on llama.cpp, the engine tested above |
+| any role | OpenAI, Speaches, Kokoro-FastAPI, other servers | untested; should work if they implement the endpoint. Run `doctor`, and please [report what you find](https://github.com/IMJONEZZ/interaction-harness/issues/new?template=server-report.yml) |
 
 How a server switches thinking on and off varies. Set `FOREGROUND_THINKING` / `BACKGROUND_THINKING` to
 `chat_template_kwargs` (vLLM, llama.cpp, SGLang with Qwen- or GLM-style templates), `reasoning_effort`, or

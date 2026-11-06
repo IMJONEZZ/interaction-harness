@@ -70,6 +70,8 @@ These are tested here:
   Run `python -m mlx_audio.server --port 8790`, then use `ASR_MODEL=mlx-community/parakeet-tdt-0.6b-v3` and
   `TTS_MODEL=prince-canuma/Kokoro-82M`.
 
-Anything else, including Ollama, LM Studio, OpenAI, Speaches and Kokoro-FastAPI, is untested here. Run
-`interaction-harness doctor` against it, which checks each role on its own, and please open an issue with
-what you find.
+Ollama and LM Studio are built on llama.cpp, so the llama.cpp results above cover them. Anything else,
+including OpenAI, Speaches and Kokoro-FastAPI, is untested here. Run `interaction-harness doctor` against
+it, which checks each role on its own, and please file a
+[server report](https://github.com/IMJONEZZ/interaction-harness/issues/new?template=server-report.yml)
+with what you find.
