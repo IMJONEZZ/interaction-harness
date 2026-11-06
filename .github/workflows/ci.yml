@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check src tests examples
+      - name: Unit tests (fakes and stubs; no models, no network)
+        run: uv run pytest -q
+      - name: CLI loads
+        run: |
+          uv run interaction-harness --version
+          uv run interaction-harness serve --help > /dev/null
+
+  speech-onnx-linux:
+    # the in-process ONNX speech stack on Linux, for real: download, TTS -> ASR round trip, partials, VAD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/interaction-harness
+          key: onnx-models-v1-int8
+      - name: Speech round trip
+        run: uv run interaction-harness warmup --backend onnx
