@@ -59,3 +59,11 @@ A backend is two small classes; see `speech/base.py` for the Protocols:
 Blocking model calls should go through `run_local` (one worker thread), so the event loop stays free and
 two models never fight over the GPU. Add the new backend to `load_asr` / `load_tts` in
 `speech/__init__.py`.
+
+## Troubleshooting
+
+- **`Error processing file '…/phontab'`.** espeak-ng, which Kokoro uses to turn text into phonemes, can't
+  use a data path longer than about 160 characters. Install somewhere with a shorter path; the default
+  `uv tool install` location is about 120.
+- **First run is slow.** In-process models download on first use. Run `interaction-harness warmup` once
+  ahead of time.
