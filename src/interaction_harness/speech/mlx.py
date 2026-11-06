@@ -5,15 +5,56 @@ MLX streams belong to the thread that created them, so construct these on the sp
 """
 from __future__ import annotations
 
+import hashlib
+import importlib
+import importlib.util
 import logging
+import shutil
+import sys
 import time
+import zipfile
 
 import numpy as np
 
-from .base import MIC_SR, PREFERRED_VOICES, run_local, to_int16
+from .base import MIC_SR, PREFERRED_VOICES, cache_dir, download, run_local, to_int16
 
 DEFAULT_ASR = "mlx-community/parakeet-tdt-0.6b-v3"
 DEFAULT_TTS = "prince-canuma/Kokoro-82M"
+# Kokoro's English phonemizer (misaki) needs this spaCy model
+SPACY_MODEL = "en_core_web_sm"
+SPACY_WHEEL = ("https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/"
+               "en_core_web_sm-3.8.0-py3-none-any.whl")
+SPACY_SHA256 = "1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85"
+
+
+def ensure_spacy_model(url: str = SPACY_WHEEL, sha256: str = SPACY_SHA256) -> None:
+    """Make en_core_web_sm importable before misaki looks for it.
+
+    misaki pip-installs the model on first use, which fails wherever there is no pip (a `uv tool` install),
+    and a PyPI package can't depend on it directly. So fetch the wheel once, check its hash, unpack it into
+    the cache and put that folder on sys.path; the wheel's .dist-info makes spaCy see it as installed.
+    """
+    if importlib.util.find_spec(SPACY_MODEL) is not None:
+        return
+    folder = cache_dir() / "spacy"
+    folder.mkdir(exist_ok=True)
+    name = url.rsplit("/", 1)[-1]
+    target = folder / name.removesuffix(".whl")
+    if not target.exists():
+        wheel = download(url, folder / name)
+        digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+        if digest != sha256:
+            wheel.unlink()
+            raise RuntimeError(f"{name}: sha256 {digest} does not match the expected {sha256}")
+        tmp = target.with_name(target.name + ".part")
+        shutil.rmtree(tmp, ignore_errors=True)
+        with zipfile.ZipFile(wheel) as z:
+            z.extractall(tmp)
+        tmp.rename(target)
+        wheel.unlink()
+    if str(target) not in sys.path:
+        sys.path.append(str(target))
+    importlib.invalidate_caches()
 
 
 class ParakeetMLX:
@@ -80,6 +121,7 @@ class KokoroMLX:
 
     def __init__(self, model_id: str | None = None, voices: list[str] | None = None):
         logging.getLogger("phonemizer").setLevel(logging.ERROR)  # "words count mismatch" on every call otherwise
+        ensure_spacy_model()
         from mlx_audio.tts.utils import load_model
         self.model_id = model_id or DEFAULT_TTS
         self.model = load_model(self.model_id)

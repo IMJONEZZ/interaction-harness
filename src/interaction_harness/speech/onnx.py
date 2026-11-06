@@ -9,27 +9,17 @@ Parakeet on ONNX has no streaming mode, so partial transcripts come from re-tran
 """
 from __future__ import annotations
 
-import os
-import sys
 import time
-from pathlib import Path
 
 import numpy as np
 
-from .base import MIC_SR, PREFERRED_VOICES, WindowedStream, run_local, to_int16
+from .base import MIC_SR, PREFERRED_VOICES, WindowedStream, cache_dir, download, run_local, to_int16
 
 DEFAULT_ASR = "nemo-parakeet-tdt-0.6b-v3"
 MAX_PASS_S = 20  # Parakeet handles about 20-30 s per pass; longer turns go in windows
 KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 KOKORO_FILES = {"fp32": "kokoro-v1.0.onnx", "fp16": "kokoro-v1.0.fp16.onnx", "int8": "kokoro-v1.0.int8.onnx"}
 KOKORO_VOICES_FILE = "voices-v1.0.bin"
-
-
-def cache_dir() -> Path:
-    base = os.getenv("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    d = Path(base) / "interaction-harness"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
 
 
 def providers(device: str) -> list[str]:
@@ -41,29 +31,6 @@ def providers(device: str) -> list[str]:
                                "(pip install 'interaction-harness[onnx-gpu]') or use DEVICE=cpu")
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
     return ["CPUExecutionProvider"]
-
-
-def download(url: str, dest: Path) -> Path:
-    """Fetch once into the cache, with a progress line; a partial download never looks finished."""
-    if dest.exists():
-        return dest
-    import httpx
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    print(f"downloading {url.rsplit('/', 1)[-1]} -> {dest}", file=sys.stderr, flush=True)
-    with httpx.stream("GET", url, follow_redirects=True, timeout=60) as r:
-        r.raise_for_status()
-        total = int(r.headers.get("content-length") or 0)
-        done, shown = 0, -1
-        with open(tmp, "wb") as f:
-            for chunk in r.iter_bytes(1 << 20):
-                f.write(chunk)
-                done += len(chunk)
-                pct = int(done * 100 / total) if total else -1
-                if total and pct // 10 != shown:
-                    shown = pct // 10
-                    print(f"  {pct:3d}%  {done / 1e6:.0f} / {total / 1e6:.0f} MB", file=sys.stderr, flush=True)
-    tmp.rename(dest)
-    return dest
 
 
 class ParakeetONNX:

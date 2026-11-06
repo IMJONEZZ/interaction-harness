@@ -12,8 +12,11 @@ models never race each other for the GPU. VAD stays synchronous: it is cheap and
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -107,3 +110,33 @@ def resample(audio: np.ndarray, sr_from: int, sr_to: int) -> np.ndarray:
     n = int(len(x) * sr_to / sr_from)
     out = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x)
     return out.astype(audio.dtype) if audio.dtype == np.int16 else out.astype(np.float32)
+
+
+def cache_dir() -> Path:
+    base = os.getenv("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    d = Path(base) / "interaction-harness"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def download(url: str, dest: Path) -> Path:
+    """Fetch once into the cache, with a progress line; a partial download never looks finished."""
+    if dest.exists():
+        return dest
+    import httpx
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    print(f"downloading {url.rsplit('/', 1)[-1]} -> {dest}", file=sys.stderr, flush=True)
+    with httpx.stream("GET", url, follow_redirects=True, timeout=60) as r:
+        r.raise_for_status()
+        total = int(r.headers.get("content-length") or 0)
+        done, shown = 0, -1
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_bytes(1 << 20):
+                f.write(chunk)
+                done += len(chunk)
+                pct = int(done * 100 / total) if total else -1
+                if total and pct // 10 != shown:
+                    shown = pct // 10
+                    print(f"  {pct:3d}%  {done / 1e6:.0f} / {total / 1e6:.0f} MB", file=sys.stderr, flush=True)
+    tmp.rename(dest)
+    return dest

@@ -1,7 +1,13 @@
 """Speech pieces that need no model: text chunking, the VAD wrapper, and the endpoint clients."""
 from __future__ import annotations
 
+import hashlib
+import importlib
+import importlib.metadata
 import io
+import shutil
+import sys
+import zipfile
 from pathlib import Path
 
 import httpx
@@ -10,6 +16,7 @@ import pytest
 import soundfile as sf
 
 from interaction_harness.config import Endpoint
+from interaction_harness.speech import mlx as mlx_speech
 from interaction_harness.speech.base import resample
 from interaction_harness.speech.endpoint import EndpointASR, EndpointTTS
 from interaction_harness.speech.silero import SileroVAD
@@ -137,3 +144,24 @@ def test_endpoint_speech_needs_a_model():
         EndpointASR(ep(model=""))
     with pytest.raises(ValueError, match="TTS_MODEL"):
         EndpointTTS(ep(role="tts", model=""))
+
+
+def test_the_spacy_model_is_fetched_checked_and_importable(tmp_path, monkeypatch):
+    name = "ih_fake_spacy_model"
+    wheel = tmp_path / f"{name}-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as z:
+        z.writestr(f"{name}/__init__.py", "LOADED = True\n")
+        z.writestr(f"{name}-1.0.dist-info/METADATA", f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n")
+    url = f"https://example.invalid/{wheel.name}"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(mlx_speech, "SPACY_MODEL", name)
+    monkeypatch.setattr(mlx_speech, "download", lambda url, dest: Path(shutil.copy(wheel, dest)))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    with pytest.raises(RuntimeError, match="sha256"):
+        mlx_speech.ensure_spacy_model(url, sha256="0" * 64)
+    mlx_speech.ensure_spacy_model(url, sha256=hashlib.sha256(wheel.read_bytes()).hexdigest())
+    try:
+        assert importlib.import_module(name).LOADED
+        assert importlib.metadata.version(name) == "1.0"  # what spaCy checks before it tries to pip install
+    finally:
+        sys.modules.pop(name, None)
