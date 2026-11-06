@@ -128,8 +128,7 @@ async def wikipedia(topic: str = "") -> dict:
 # --------------------------------------------------------------------------- #
 # async: these come back later through the proactive channel
 # --------------------------------------------------------------------------- #
-@tool(description="Set a timer or a reminder, such as 'remind me in 30 seconds to stretch'. When it fires, the "
-                  "assistant will proactively tell the user.",
+@tool(description="Set a timer or a reminder. When it fires, the assistant will proactively tell the user.",
       parameters=_p({"seconds": {"type": "number"}, "label": {"type": "string"}}, ["seconds", "label"]),
       lanes=["foreground", "duplex"])
 async def set_timer(ctx: ToolContext, seconds: float = 0, label: str = "timer") -> dict:

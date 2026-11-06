@@ -135,7 +135,14 @@ sometimes starts answering before you finish.
 After a tool result it nearly always tries to call another tool at once: in 15 of the 17 results in our
 logs, the very next step was a start-of-call token. The harness holds that off for 2 s, which leaves the
 model its turn to say the answer, but it doesn't always recover. In the demo recording, after setting the
-timer it went on about cities nobody had mentioned (the recording is cut there).
+timer it went on about cities nobody had mentioned (the recording is cut there). Scripted runs haven't
+reproduced that: with synthesized voices, with and without the real room noise from that recording, it
+answered the time, the timer and the weather cleanly every time. So far the rambling has only shown up in
+live conversation.
+
+Tool descriptions leave out examples, because this model repeats them: with "such as 'remind me in 30
+seconds to stretch'" in `set_timer`'s description, it offered to set that reminder when it was only asked
+the time.
 
 The cascade's median on the same machine is about 0.8–0.9 s (see the README), so on plain questions the
 duplex model answers faster. A tool turn is slower, because the call and its result travel through the
