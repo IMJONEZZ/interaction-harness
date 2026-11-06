@@ -82,7 +82,7 @@ In full-duplex mode the model's audio arrives as one continuous stream of 80 ms 
 | `background.round` | `id`, `round`, `tokens`, `tps`, `ms` | one background model call finished |
 | `background.done` | `id`, `result`, `ms` | the result, waiting for a gap |
 | `proactive` | `kind` (`timer` or `background`), `id`, … | the agent takes its own turn to deliver it |
-| `duplex.status` | `state` (`loading`, `ready`, `error`, `closed`), `model`, `load_ms`, `tool_outputs`, `error` | the full-duplex session |
+| `duplex.status` | `state` (`loading`, `waiting` while the server has another session open, `ready`, `error`, `closed`), `model`, `load_ms`, `tool_outputs`, `error` | the full-duplex session |
 | `duplex.utterance` | `turn`, `text` | the duplex model finished saying something |
 | `duplex.overlap` | `who` (`you` or `model`), `text` | someone started talking over the other |
 | `duplex.yield` | `ms`, `kept_talking`, `turn` | how long the model kept talking after you cut in |

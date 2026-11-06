@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,6 +13,7 @@ import pytest
 import uvicorn
 from conftest import FakeLLM, Harness, make_settings
 
+from interaction_harness import duplex
 from interaction_harness.config import Endpoint
 from interaction_harness.duplex import (
     STREAM_SILENT,
@@ -189,6 +191,12 @@ class ScriptedParent:
         return self.sessions[-1]
 
 
+class SlowParent(ScriptedParent):
+    def create_streaming_session(self, system_prompt=None, seed=0):
+        time.sleep(0.5)  # loading the prompt takes a while
+        return super().create_streaming_session(system_prompt, seed)
+
+
 @pytest.fixture
 async def duplex_server():
     engine = DuplexEngine("scripted")
@@ -277,3 +285,33 @@ async def test_only_one_client_at_a_time(duplex_server):
             except ConnectionClosed as e:
                 assert e.rcvd.code == 1013
     assert any(m["type"] == "error" and m["error"]["code"] == "server_busy" for m in msgs)
+
+
+async def test_a_tab_closed_while_the_prompt_loads_lets_go_of_the_server(duplex_server, monkeypatch):
+    engine, url = duplex_server
+    engine.parent = SlowParent()
+    monkeypatch.setattr(duplex, "BUSY_RETRY_S", 0.1)
+    settings = make_settings(DUPLEX_BASE_URL=url)
+    first = Harness(Session, FakeLLM(), settings=settings, auto_play=False)
+    await first.wait_for("duplex.status", pred=lambda e: e["state"] == "loading")
+    await asyncio.sleep(0.1)       # the server is loading the first tab's prompt...
+    await first.session.close()    # ...when the tab reloads
+    second = Harness(Session, FakeLLM(), settings=settings, auto_play=False)
+    await second.wait_for("duplex.status", pred=lambda e: e["state"] == "waiting")
+    await second.wait_for("duplex.status", pred=lambda e: e["state"] == "ready", timeout=10)
+    await second.session.close()
+
+
+async def test_a_second_tab_waits_for_the_server_then_says_why(duplex_server, monkeypatch):
+    _, url = duplex_server
+    monkeypatch.setattr(duplex, "BUSY_WAIT_S", 0.3)
+    monkeypatch.setattr(duplex, "BUSY_RETRY_S", 0.1)
+    settings = make_settings(DUPLEX_BASE_URL=url)
+    first = Harness(Session, FakeLLM(), settings=settings, auto_play=False)
+    await first.wait_for("duplex.status", pred=lambda e: e["state"] == "ready")
+    second = Harness(Session, FakeLLM(), settings=settings, auto_play=False)
+    await second.wait_for("duplex.status", pred=lambda e: e["state"] == "waiting")
+    err = await second.wait_for("duplex.status", pred=lambda e: e["state"] == "error")
+    assert "another dashboard tab" in err["error"]
+    await second.session.close()
+    await first.session.close()

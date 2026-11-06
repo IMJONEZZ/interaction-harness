@@ -39,6 +39,8 @@ HANGOVER_S = HANGOVER_FRAMES * 0.08
 USER_END_MS = 500        # this much silence ends your utterance (for measuring only; the model decides)
 YIELD_GIVE_UP_S = 4.0    # still talking this long after you cut in: it didn't yield
 TEXT_IDLE_S = 0.8        # agent text and audio both quiet this long: its utterance is over
+BUSY_WAIT_S = 60.0       # the server has another session open: keep trying this long (a reloaded tab's lets go)
+BUSY_RETRY_S = 2.0
 
 # NVIDIA's tool-calling protocol for this model (the system message is followed by the tools and these rules)
 _TOOL_PROTOCOL = (
@@ -165,17 +167,28 @@ class DuplexLink:
         """Whether the server can feed tool results to the model (duplex-server can; mlx-vlm's can't yet)."""
         return bool(self.info.get("tool_outputs"))
 
-    async def open(self, system_prompt: str, timeout: float = 180) -> dict:
+    async def open(self, system_prompt: str, timeout: float = 180, on_accepted=None) -> dict:
         from websockets.asyncio.client import connect
+        from websockets.exceptions import ConnectionClosed
         self.ws = await connect(realtime_url(self.ep), max_size=None, additional_headers=self._headers, open_timeout=10)
-        await self.send({"type": "session.update", "session": {"model": self.model, "system_prompt": system_prompt}})
-        while True:  # the prompt loads one token per step, so this can take a while
-            msg = json.loads(await asyncio.wait_for(self.ws.recv(), timeout))
-            if msg.get("type") == "session.updated":
-                self.info = msg.get("session") or {}
-                return self.info
-            if msg.get("type") == "error":
-                raise RuntimeError(msg.get("error", {}).get("message", "duplex endpoint error"))
+        try:
+            await self.send({"type": "session.update", "session": {"model": self.model, "system_prompt": system_prompt}})
+            while True:  # the prompt loads one token per step, so this can take a while
+                msg = json.loads(await asyncio.wait_for(self.ws.recv(), timeout))
+                if msg.get("type") == "session.created" and on_accepted:
+                    await on_accepted()
+                if msg.get("type") == "session.updated":
+                    self.info = msg.get("session") or {}
+                    return self.info
+                if msg.get("type") == "error":
+                    err = msg.get("error") or {}
+                    if err.get("code") == "server_busy":
+                        raise DuplexBusy()
+                    raise RuntimeError(err.get("message", "duplex endpoint error"))
+        except ConnectionClosed as e:
+            if e.rcvd and e.rcvd.code == 1013:  # try again later: the server's one session is taken
+                raise DuplexBusy() from None
+            raise
 
     async def send(self, d: dict) -> None:
         await self.ws.send(json.dumps(d))
@@ -201,6 +214,11 @@ class DuplexLink:
             except Exception:  # noqa: BLE001
                 pass
             self.ws = None
+
+
+class DuplexBusy(RuntimeError):
+    def __init__(self):
+        super().__init__("the duplex server already has a session open (another dashboard tab?)")
 
 
 class DuplexMode:
@@ -255,13 +273,34 @@ class DuplexMode:
         await link.resolve_model()
         await s.emit("duplex.status", state="loading", model=link.model, host=s.s.duplex.host,
                      prompt_chars=len(prompt))
-        t0 = time.perf_counter()
-        try:
-            await link.open(prompt)
-        except Exception as e:  # noqa: BLE001
-            await s.emit("duplex.status", state="error", error=f"{type(e).__name__}: {e}")
-            await link.close()
-            return
+        t_first, waiting = time.perf_counter(), False
+
+        async def accepted():
+            nonlocal waiting
+            if waiting:  # the server let go of the other session; this one is loading its prompt now
+                waiting = False
+                await s.emit("duplex.status", state="loading", model=link.model, host=s.s.duplex.host,
+                             prompt_chars=len(prompt))
+
+        while True:
+            t0 = time.perf_counter()
+            try:
+                await link.open(prompt, on_accepted=accepted)
+                break
+            except asyncio.CancelledError:
+                await link.close()  # closed while the prompt loads: let go of the server's one session
+                raise
+            except Exception as e:  # noqa: BLE001
+                await link.close()
+                if isinstance(e, DuplexBusy) and time.perf_counter() - t_first < BUSY_WAIT_S:
+                    if not waiting:
+                        waiting = True
+                        await s.emit("duplex.status", state="waiting", model=link.model, host=s.s.duplex.host,
+                                     error=str(e))
+                    await asyncio.sleep(BUSY_RETRY_S)
+                    continue
+                await s.emit("duplex.status", state="error", error=f"{type(e).__name__}: {e}")
+                return
         self.link, self.ready = link, True
         await s.emit("duplex.status", state="ready", model=link.model, load_ms=round((time.perf_counter() - t0) * 1000),
                      tool_outputs=link.tool_outputs, frame_samples=link.info.get("frame_samples"))

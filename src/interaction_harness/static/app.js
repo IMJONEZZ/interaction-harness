@@ -330,7 +330,7 @@
     proactive(ev) { const c = document.getElementById('task-' + ev.id); if (c) setStatus(c, cfg.mode === 'duplex' ? 'handed to the duplex model' : 'delivered proactively', 'delivered'); },
     'duplex.status'(ev) {
       const pill = $('#pill-duplex');
-      const st = { loading: 'loading its prompt…', ready: `ready (${fmtMs(ev.load_ms)}${ev.tool_outputs ? '' : ', no tool results'})`, error: 'error', closed: 'closed' }[ev.state] || ev.state;
+      const st = { loading: 'loading its prompt…', waiting: 'waiting: the server has another session open', ready: `ready (${fmtMs(ev.load_ms)}${ev.tool_outputs ? '' : ', no tool results'})`, error: 'error', closed: 'closed' }[ev.state] || ev.state;
       pill.classList.toggle('off', ev.state === 'error' || ev.state === 'closed');
       pill.title = `full-duplex speech model — ${st}${ev.error ? ': ' + ev.error : ''}`;
       if (cfg.mode === 'duplex') $('#llm-stat').textContent = `duplex ${st}`;
